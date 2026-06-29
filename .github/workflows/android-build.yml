@@ -34,3 +34,14 @@ jobs:
         with:
           name: mangprang-switcher-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Commit debug APK into repo
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p releases/latest
+          cp app/build/outputs/apk/debug/*.apk releases/latest/mangprang-switcher-debug.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add releases/latest/mangprang-switcher-debug.apk
+          git commit -m "Update debug APK artifact [skip ci]" || exit 0
+          git push

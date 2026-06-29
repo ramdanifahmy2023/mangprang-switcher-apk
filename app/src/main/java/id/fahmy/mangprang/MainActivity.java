@@ -4,12 +4,17 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Build;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
+import android.view.Window;
+import android.view.WindowInsets;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
@@ -66,10 +71,14 @@ public class MainActivity extends Activity {
     private EditText passwordInput;
     private EditText searchInput;
     private LinearLayout merchantListView;
+    private Button refreshButton;
+    private Button clearSearchButton;
     private WebView webView;
     private int webScale = 72;
     private int screenMode = 1;
+    private int navBottomInset = 0;
     private boolean loggedInToTracsh = false;
+    private boolean enteringStore = false;
     private final List<Merchant> merchants = new ArrayList<>();
     private String currentScreen = "login";
 
@@ -77,6 +86,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         CookieManager.getInstance().setAcceptCookie(true);
+        configureSystemBars();
         computeScreenMode();
         showLoginScreen();
     }
@@ -92,6 +102,39 @@ public class MainActivity extends Activity {
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private int adaptive(int compact, int normal, int tall) { return screenMode == 0 ? compact : (screenMode == 2 ? tall : normal); }
+
+    private void configureSystemBars() {
+        Window window = getWindow();
+        window.setStatusBarColor(BG);
+        window.setNavigationBarColor(Color.WHITE);
+        if (Build.VERSION.SDK_INT >= 23) {
+            window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
+    }
+
+    private GradientDrawable bg(int color, int radiusDp) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radiusDp));
+        return g;
+    }
+
+    private GradientDrawable borderedBg(int color, int radiusDp, int strokeColor) {
+        GradientDrawable g = bg(color, radiusDp);
+        g.setStroke(dp(1), strokeColor);
+        return g;
+    }
+
+    private void applyInsetsAwarePadding(View view, int left, int top, int right, int bottom) {
+        view.setPadding(dp(left), dp(top), dp(right), dp(bottom) + navBottomInset);
+        if (Build.VERSION.SDK_INT >= 20) {
+            view.setOnApplyWindowInsetsListener((v, insets) -> {
+                navBottomInset = insets.getSystemWindowInsetBottom();
+                v.setPadding(dp(left), dp(top), dp(right), dp(bottom) + navBottomInset);
+                return insets;
+            });
+        }
+    }
 
     private void baseRoot() {
         computeScreenMode();
@@ -123,8 +166,9 @@ public class MainActivity extends Activity {
         btn.setTextColor(Color.WHITE);
         btn.setTextSize(14);
         btn.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        btn.setBackgroundColor(PRIMARY);
+        btn.setBackground(bg(PRIMARY, 10));
         btn.setAllCaps(false);
+        btn.setMinHeight(dp(48));
         btn.setPadding(dp(16), dp(10), dp(16), dp(10));
         return btn;
     }
@@ -134,8 +178,9 @@ public class MainActivity extends Activity {
         btn.setText(value);
         btn.setTextColor(TEXT);
         btn.setTextSize(13);
-        btn.setBackgroundColor(LINE);
+        btn.setBackground(borderedBg(Color.WHITE, 10, LINE));
         btn.setAllCaps(false);
+        btn.setMinHeight(dp(48));
         btn.setPadding(dp(10), dp(8), dp(10), dp(8));
         return btn;
     }
@@ -145,10 +190,11 @@ public class MainActivity extends Activity {
         et.setHint(hint);
         et.setSingleLine(true);
         et.setTextSize(14);
+        et.setMinHeight(dp(48));
         et.setPadding(dp(14), dp(10), dp(14), dp(10));
         et.setTextColor(TEXT);
         et.setHintTextColor(MUTED);
-        et.setBackgroundColor(Color.rgb(248, 250, 252));
+        et.setBackground(borderedBg(Color.rgb(248, 250, 252), 12, LINE));
         et.setInputType(password ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         return et;
     }
@@ -157,7 +203,17 @@ public class MainActivity extends Activity {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setPadding(dp(adaptive(16, 20, 22)), dp(adaptive(14, 18, 20)), dp(adaptive(16, 20, 22)), dp(adaptive(14, 18, 20)));
-        c.setBackgroundColor(CARD);
+        c.setBackground(borderedBg(CARD, 16, LINE));
+        if (Build.VERSION.SDK_INT >= 21) c.setElevation(dp(1));
+        return c;
+    }
+
+    private LinearLayout storeCard() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setPadding(dp(16), dp(14), dp(16), dp(14));
+        c.setBackground(borderedBg(CARD, 14, LINE));
+        if (Build.VERSION.SDK_INT >= 21) c.setElevation(dp(1));
         return c;
     }
 
@@ -176,8 +232,9 @@ public class MainActivity extends Activity {
     private LinearLayout bottomBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.VERTICAL);
-        bar.setPadding(dp(14), dp(10), dp(14), dp(12));
+        applyInsetsAwarePadding(bar, 16, 10, 16, 14);
         bar.setBackgroundColor(Color.WHITE);
+        if (Build.VERSION.SDK_INT >= 21) bar.setElevation(dp(8));
         return bar;
     }
 
@@ -256,40 +313,40 @@ public class MainActivity extends Activity {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(18), dp(16), dp(18), dp(10));
+        header.setPadding(dp(16), dp(adaptive(28, 34, 40)), dp(16), dp(12));
         header.setBackgroundColor(Color.WHITE);
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView title = text("Pilih Toko", 22, TEXT, Typeface.BOLD);
+        TextView title = text("Pilih Toko", adaptive(24, 26, 28), TEXT, Typeface.BOLD);
         header.addView(title, new LinearLayout.LayoutParams(-1, -2));
-        statusText = text("Session Tracsh aktif. Memuat toko...", 12, MUTED, Typeface.NORMAL);
+        statusText = text("Session Tracsh aktif. Memuat toko...", adaptive(14, 14, 15), MUTED, Typeface.NORMAL);
         statusText.setPadding(0, dp(2), 0, 0);
         header.addView(statusText, new LinearLayout.LayoutParams(-1, -2));
 
         ScrollView scroll = new ScrollView(this);
         merchantListView = new LinearLayout(this);
         merchantListView.setOrientation(LinearLayout.VERTICAL);
-        merchantListView.setPadding(dp(14), dp(10), dp(14), dp(10));
+        merchantListView.setPadding(dp(16), dp(12), dp(16), dp(12));
         scroll.addView(merchantListView);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout bar = bottomBar();
         root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
-        searchInput = input("Cari toko / email / group", false);
+        searchInput = input("Cari toko, email, atau grup", false);
         bar.addView(searchInput, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout bottomRow = horizontalRow();
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
         rowLp.setMargins(0, dp(8), 0, 0);
         bar.addView(bottomRow, rowLp);
-        Button refresh = secondaryButton("Refresh Toko");
-        Button clear = secondaryButton("Clear Search");
-        bottomRow.addView(refresh, new LinearLayout.LayoutParams(0, -2, 1));
+        refreshButton = secondaryButton("Refresh Toko");
+        clearSearchButton = secondaryButton("Clear Search");
+        bottomRow.addView(refreshButton, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(0, -2, 1);
         clearLp.setMargins(dp(8), 0, 0, 0);
-        bottomRow.addView(clear, clearLp);
+        bottomRow.addView(clearSearchButton, clearLp);
 
-        refresh.setOnClickListener(v -> fetchMerchants());
-        clear.setOnClickListener(v -> searchInput.setText(""));
+        refreshButton.setOnClickListener(v -> fetchMerchants());
+        clearSearchButton.setOnClickListener(v -> searchInput.setText(""));
         searchInput.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             public void onTextChanged(CharSequence value, int start, int before, int count) { renderMerchantList(value.toString()); }
@@ -297,8 +354,22 @@ public class MainActivity extends Activity {
         });
 
         progress = new ProgressBar(this);
-        merchantListView.addView(progress, new LinearLayout.LayoutParams(-1, -2));
+        showListLoading("Memuat daftar toko...");
         fetchMerchants();
+    }
+
+    private void showListLoading(String message) {
+        if (merchantListView == null) return;
+        merchantListView.removeAllViews();
+        if (statusText != null) statusText.setText(message);
+        progress = new ProgressBar(this);
+        merchantListView.addView(progress, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void setControlsEnabled(boolean enabled) {
+        if (refreshButton != null) refreshButton.setEnabled(enabled);
+        if (clearSearchButton != null) clearSearchButton.setEnabled(enabled);
+        if (searchInput != null) searchInput.setEnabled(enabled);
     }
 
     private void renderMerchantList(String query) {
@@ -310,7 +381,7 @@ public class MainActivity extends Activity {
             String hay = (m.title + " " + m.email + " " + m.groupTitle + " " + m.employeeName).toLowerCase();
             if (!q.isEmpty() && !hay.contains(q)) continue;
             shown++;
-            LinearLayout c = card();
+            LinearLayout c = storeCard();
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.setMargins(0, 0, 0, dp(10));
             merchantListView.addView(c, lp);
@@ -322,17 +393,20 @@ public class MainActivity extends Activity {
             LinearLayout info = new LinearLayout(this);
             info.setOrientation(LinearLayout.VERTICAL);
             row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
-            info.addView(text(m.title.isEmpty() ? "Toko tanpa nama" : m.title, 16, TEXT, Typeface.BOLD));
+            TextView storeTitle = text(m.title.isEmpty() ? "Toko tanpa nama" : m.title, 16, TEXT, Typeface.BOLD);
+            storeTitle.setMaxLines(2);
+            storeTitle.setEllipsize(TextUtils.TruncateAt.END);
+            info.addView(storeTitle);
             if (!m.email.isEmpty()) info.addView(text(maskEmail(m.email), 12, MUTED, Typeface.NORMAL));
             String meta = joinNonEmpty(m.groupTitle, m.employeeName);
             if (!meta.isEmpty()) info.addView(text(meta, 12, MUTED, Typeface.NORMAL));
             info.addView(text(m.hasCookie() ? "Siap masuk Akulaku" : "Cookie diambil saat masuk", 11, m.hasCookie() ? SUCCESS : DANGER, Typeface.BOLD));
 
             Button open = primaryButton("Masuk");
-            LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(dp(92), -2);
+            LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(dp(adaptive(96, 104, 112)), dp(48));
             openLp.setMargins(dp(10), 0, 0, 0);
             row.addView(open, openLp);
-            open.setOnClickListener(v -> openMerchant(m));
+            open.setOnClickListener(v -> openMerchant(m, open));
         }
         statusText.setText(shown + " toko tampil dari " + merchants.size() + " toko");
         if (shown == 0) {
@@ -341,6 +415,7 @@ public class MainActivity extends Activity {
             merchantListView.addView(empty, new LinearLayout.LayoutParams(-1, -2));
         }
         if (progress != null) progress.setVisibility(View.GONE);
+        setControlsEnabled(true);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -363,7 +438,7 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(90);
         settings.setDefaultZoom(WebSettings.ZoomDensity.FAR);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.1");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setInitialScale(webScale);
         webView.setWebViewClient(new WebViewClient() {
@@ -481,8 +556,8 @@ public class MainActivity extends Activity {
     }
 
     private void fetchMerchants() {
-        if (progress != null) progress.setVisibility(View.VISIBLE);
-        if (statusText != null) statusText.setText("Mengambil daftar toko dari Tracsh...");
+        setControlsEnabled(false);
+        showListLoading("Mengambil daftar toko dari Tracsh...");
         new Thread(() -> {
             try {
                 HttpURLConnection conn = open(MERCHANT_ENDPOINT, "GET", null);
@@ -497,13 +572,23 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (progress != null) progress.setVisibility(View.GONE);
+                    setControlsEnabled(true);
                     if (statusText != null) statusText.setText("Gagal ambil toko: " + e.getMessage());
+                    if (merchantListView != null) {
+                        merchantListView.removeAllViews();
+                        TextView err = centerText("Gagal memuat toko. Tekan Refresh Toko.", 14, MUTED, Typeface.NORMAL);
+                        err.setPadding(0, dp(24), 0, dp(24));
+                        merchantListView.addView(err, new LinearLayout.LayoutParams(-1, -2));
+                    }
                 });
             }
         }).start();
     }
 
-    private void openMerchant(Merchant merchant) {
+    private void openMerchant(Merchant merchant, Button sourceButton) {
+        if (enteringStore) return;
+        enteringStore = true;
+        if (sourceButton != null) { sourceButton.setEnabled(false); sourceButton.setText("Masuk..."); }
         if (progress != null) progress.setVisibility(View.VISIBLE);
         if (statusText != null) statusText.setText("Menyiapkan login Akulaku untuk " + merchant.title + "...");
         new Thread(() -> {
@@ -514,11 +599,15 @@ public class MainActivity extends Activity {
                 clearAkulakuCookiesOnly();
                 applyAkulakuCookie(cookie);
                 runOnUiThread(() -> {
+                    enteringStore = false;
+                    if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
                     showAkulakuScreen();
                     webView.loadUrl(AKULAKU_VENDOR_URL);
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
+                    enteringStore = false;
+                    if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
                     if (progress != null) progress.setVisibility(View.GONE);
                     if (statusText != null) statusText.setText("Belum bisa masuk toko: " + e.getMessage());
                 });
@@ -544,7 +633,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.0");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.1");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }

@@ -1,10 +1,10 @@
 # Mangprang Switcher APK
 
-Android APK helper internal PT FahmyID untuk membuka Akulaku Seller di WebView, membaca cookie Akulaku dari WebView, lalu sync cookie ke Tracsh.
+Android APK helper internal PT FahmyID untuk login Tracsh, menampilkan daftar toko milik user, lalu auto-login ke Akulaku Seller dengan cookie toko dari Tracsh.
 
 ## Status
 
-Versi awal native Android WebView. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa pakai dari HP Android.
+Versi v0.2 native Android WebView. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa switch toko Akulaku dari HP Android lewat akun Tracsh.
 
 ## Cara Build
 
@@ -26,15 +26,15 @@ app/build/outputs/apk/debug/app-debug.apk
 
 1. Install APK debug dari GitHub Actions artifact.
 2. Buka aplikasi.
-3. Login ke Akulaku Seller di WebView lewat tombol **Akulaku**.
-4. Jika endpoint Tracsh butuh session, buka tombol **Tracsh** lalu login Tracsh di WebView yang sama.
-5. Isi Merchant ID.
-6. Klik **Baca** untuk membaca cookie Akulaku.
-7. Klik **Sync**.
+3. Login memakai username/password Tracsh.
+4. Pilih toko dari daftar toko milik user.
+5. Klik **Masuk Toko**.
+6. App inject cookie toko ke WebView dan membuka Akulaku Seller.
 
 ## Guardrail
 
-- Aplikasi tidak menampilkan raw cookie; status hanya menampilkan nama cookie yang dimask.
-- Session cookie Tracsh dari WebView ikut dikirim sebagai header `Cookie` saat sync bila tersedia, tetapi tidak pernah ditampilkan di UI.
+- Aplikasi tidak menampilkan raw cookie.
+- Password Tracsh tidak disimpan.
+- Cookie toko hanya dipakai untuk inject WebView Akulaku.
 - Jangan share APK ke luar tim internal.
 - Endpoint aktif: `https://tracsh.com/api/updateCookie`.

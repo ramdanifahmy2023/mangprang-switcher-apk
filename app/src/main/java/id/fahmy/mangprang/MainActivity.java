@@ -32,6 +32,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
     private static final String TRACSH_BASE_URL = "https://tracsh.com";
@@ -231,7 +234,7 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.2.1");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
@@ -248,16 +251,30 @@ public class MainActivity extends Activity {
         statusText.setText("Login ke Tracsh...");
         new Thread(() -> {
             Exception last = null;
+            String csrf = "";
+            try {
+                HttpURLConnection preflight = open(TRACSH_LOGIN_PAGE, "GET", null);
+                String loginHtml = readResponse(preflight);
+                saveCookies(preflight);
+                csrf = extractCsrf(loginHtml);
+            } catch (Exception e) { last = e; }
+
             String[] endpoints = {"/procAuth/adminSignIn", "/procAuth/signIn", "/auth/signIn"};
             String[][] fieldSets = {{"username", "password"}, {"email", "password"}, {"username", "pass"}};
             for (String endpoint : endpoints) {
                 for (String[] fields : fieldSets) {
                     try {
                         String body = encode(fields[0], username) + "&" + encode(fields[1], password);
+                        if (!csrf.isEmpty()) {
+                            body += "&" + encode("csrfToken", csrf);
+                            body += "&" + encode("csrf_token", csrf);
+                            body += "&" + encode("_token", csrf);
+                        }
                         HttpURLConnection conn = open(TRACSH_BASE_URL + endpoint, "POST", "application/x-www-form-urlencoded");
                         try (OutputStream os = conn.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
                         int code = conn.getResponseCode();
                         String text = readResponse(conn);
+                        saveCookies(conn);
                         if (code >= 200 && code < 400 && !looksLikeLoginFailed(text, conn.getURL().toString())) {
                             runOnUiThread(() -> showMerchantScreen());
                             return;
@@ -278,6 +295,7 @@ public class MainActivity extends Activity {
                 HttpURLConnection conn = open(MERCHANT_ENDPOINT, "GET", null);
                 int code = conn.getResponseCode();
                 String text = readResponse(conn);
+                saveCookies(conn);
                 if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
                 List<Merchant> parsed = parseMerchants(text);
                 merchants.clear();
@@ -316,6 +334,7 @@ public class MainActivity extends Activity {
         HttpURLConnection conn = open(MERCHANT_COOKIE_ENDPOINT, "POST", "application/json");
         try (OutputStream os = conn.getOutputStream()) { os.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
         int code = conn.getResponseCode();
+        saveCookies(conn);
         if (code < 200 || code >= 300) return "";
         JSONObject data = new JSONObject(readResponse(conn));
         return data.optString("cookie", data.optString("data", ""));
@@ -324,12 +343,40 @@ public class MainActivity extends Activity {
     private HttpURLConnection open(String url, String method, String contentType) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod(method);
-        conn.setInstanceFollowRedirects(true);
+        conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.2.1");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }
         return conn;
+    }
+
+    private void saveCookies(HttpURLConnection conn) {
+        Map<String, List<String>> headers = conn.getHeaderFields();
+        if (headers == null) return;
+        List<String> values = headers.get("Set-Cookie");
+        if (values == null) values = headers.get("set-cookie");
+        if (values == null) return;
+        CookieManager cm = CookieManager.getInstance();
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) cm.setCookie(TRACSH_BASE_URL, value);
+        }
+        cm.flush();
+    }
+
+    private String extractCsrf(String html) {
+        if (html == null || html.isEmpty()) return "";
+        String[] patterns = {
+            "name=[\"']csrfToken[\"']\\s+value=[\"']([^\"']+)",
+            "name=[\"']csrf_token[\"']\\s+value=[\"']([^\"']+)",
+            "name=[\"']_token[\"']\\s+value=[\"']([^\"']+)"
+        };
+        for (String pattern : patterns) {
+            Matcher matcher = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE).matcher(html);
+            if (matcher.find()) return matcher.group(1);
+        }
+        return "";
     }
 
     private String readResponse(HttpURLConnection conn) throws Exception {
@@ -403,7 +450,7 @@ public class MainActivity extends Activity {
 
     private boolean looksLikeLoginFailed(String text, String url) {
         String hay = ((text == null ? "" : text) + "\n" + (url == null ? "" : url)).toLowerCase();
-        return hay.contains("password salah") || hay.contains("login gagal") || hay.contains("invalid") || hay.contains("/auth/signin");
+        return hay.contains("password salah") || hay.contains("login gagal") || hay.contains("invalid") || (url != null && url.toLowerCase().contains("/auth/signin"));
     }
 
     private String encode(String k, String v) throws Exception { return URLEncoder.encode(k, "UTF-8") + "=" + URLEncoder.encode(v, "UTF-8"); }

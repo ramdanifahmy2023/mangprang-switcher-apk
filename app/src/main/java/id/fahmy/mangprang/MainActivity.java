@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     private EditText passwordInput;
     private EditText searchInput;
     private WebView webView;
+    private int webScale = 72;
     private final List<Merchant> merchants = new ArrayList<>();
     private String currentScreen = "login";
 
@@ -220,27 +221,88 @@ public class MainActivity extends Activity {
     private void showAkulakuScreen() {
         currentScreen = "akulaku";
         baseRoot();
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setPadding(10, 10, 10, 10);
-        bar.setBackgroundColor(Color.WHITE);
-        Button back = secondaryButton("Daftar Toko");
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.VERTICAL);
+        top.setPadding(10, 10, 10, 8);
+        top.setBackgroundColor(Color.WHITE);
+        root.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        Button back = secondaryButton("Toko");
+        Button home = primaryButton("Akulaku Home");
         Button reload = secondaryButton("Reload");
-        bar.addView(back, new LinearLayout.LayoutParams(0, -2, 1));
-        bar.addView(reload, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
+        row1.addView(back, new LinearLayout.LayoutParams(0, -2, 1));
+        row1.addView(home, new LinearLayout.LayoutParams(0, -2, 2));
+        row1.addView(reload, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(row1, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        Button zoomOut = secondaryButton("Zoom -");
+        Button fit = secondaryButton("Fit layar");
+        Button zoomIn = secondaryButton("Zoom +");
+        row2.addView(zoomOut, new LinearLayout.LayoutParams(0, -2, 1));
+        row2.addView(fit, new LinearLayout.LayoutParams(0, -2, 1));
+        row2.addView(zoomIn, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(row2, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView hint = text("Tips: cubit layar untuk zoom, geser kiri-kanan untuk tabel/menu Akulaku.", 12, Color.rgb(71, 85, 105), 0);
+        hint.setPadding(4, 6, 4, 0);
+        top.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.2.1");
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setSupportZoom(true);
+        settings.setBuiltInZoomControls(true);
+        settings.setDisplayZoomControls(false);
+        settings.setTextZoom(92);
+        settings.setDefaultZoom(WebSettings.ZoomDensity.FAR);
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.2.2");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
-        webView.setWebViewClient(new WebViewClient());
+        webView.setInitialScale(webScale);
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                injectAkulakuDesktopFit(view);
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient());
         root.addView(webView, new LinearLayout.LayoutParams(-1, 0, 1));
+
         back.setOnClickListener(v -> showMerchantScreen());
-        reload.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
+        home.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
+        reload.setOnClickListener(v -> webView.reload());
+        zoomOut.setOnClickListener(v -> setWebScale(webScale - 10));
+        fit.setOnClickListener(v -> setWebScale(72));
+        zoomIn.setOnClickListener(v -> setWebScale(webScale + 10));
+    }
+
+    private void setWebScale(int scale) {
+        if (scale < 45) scale = 45;
+        if (scale > 140) scale = 140;
+        webScale = scale;
+        if (webView != null) {
+            webView.setInitialScale(webScale);
+            webView.zoomBy(webScale / 100.0f);
+            injectAkulakuDesktopFit(webView);
+        }
+    }
+
+    private void injectAkulakuDesktopFit(WebView view) {
+        String js = "(function(){" +
+            "var head=document.head||document.getElementsByTagName('head')[0];" +
+            "if(head&&!document.getElementById('mangprang-viewport')){var m=document.createElement('meta');m.id='mangprang-viewport';m.name='viewport';m.content='width=1200, initial-scale=0.35, minimum-scale=0.25, maximum-scale=2.5, user-scalable=yes';head.appendChild(m);}" +
+            "if(head&&!document.getElementById('mangprang-style')){var s=document.createElement('style');s.id='mangprang-style';s.innerHTML='html,body{min-width:1100px!important;overflow:auto!important;-webkit-text-size-adjust:85%!important;} table,.ant-table,.el-table{font-size:12px!important;} input,button,select,textarea{font-size:13px!important;} .ant-layout,.el-container{min-width:1100px!important;}';head.appendChild(s);}" +
+            "})();";
+        view.evaluateJavascript(js, null);
     }
 
     private void doLogin() {
@@ -345,7 +407,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.2.1");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.2.2");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }

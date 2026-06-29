@@ -7,6 +7,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Build;
+import android.graphics.Insets;
 import android.view.WindowInsets;
 import android.text.Editable;
 import android.text.InputType;
@@ -141,14 +142,27 @@ public class MainActivity extends Activity {
         setResolvedPadding(view, left, top, right, bottom, includeTop, includeBottom, includeHorizontal);
         if (Build.VERSION.SDK_INT >= 20) {
             view.setOnApplyWindowInsetsListener((v, insets) -> {
-                safeLeftInset = insets.getSystemWindowInsetLeft();
-                safeTopInset = insets.getSystemWindowInsetTop();
-                safeRightInset = insets.getSystemWindowInsetRight();
-                safeBottomInset = insets.getSystemWindowInsetBottom();
+                updateSafeInsets(insets);
                 setResolvedPadding(v, left, top, right, bottom, includeTop, includeBottom, includeHorizontal);
                 return insets;
             });
             view.requestApplyInsets();
+        }
+    }
+
+    private void updateSafeInsets(WindowInsets insets) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+            Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
+            safeLeftInset = Math.max(bars.left, cutout.left);
+            safeTopInset = Math.max(bars.top, cutout.top);
+            safeRightInset = Math.max(bars.right, cutout.right);
+            safeBottomInset = Math.max(bars.bottom, cutout.bottom);
+        } else {
+            safeLeftInset = insets.getSystemWindowInsetLeft();
+            safeTopInset = insets.getSystemWindowInsetTop();
+            safeRightInset = insets.getSystemWindowInsetRight();
+            safeBottomInset = insets.getSystemWindowInsetBottom();
         }
     }
 
@@ -491,7 +505,7 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(100);
         settings.setDefaultZoom(WebSettings.ZoomDensity.MEDIUM);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.5");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setInitialScale(webScale);
         webView.setWebViewClient(new WebViewClient() {
@@ -681,7 +695,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.4");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.5");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }

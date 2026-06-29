@@ -14,7 +14,6 @@ import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.Window;
-import android.view.WindowInsets;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
@@ -108,7 +107,7 @@ public class MainActivity extends Activity {
         window.setStatusBarColor(BG);
         window.setNavigationBarColor(Color.WHITE);
         if (Build.VERSION.SDK_INT >= 23) {
-            window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+            window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         }
     }
 
@@ -232,7 +231,7 @@ public class MainActivity extends Activity {
     private LinearLayout bottomBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.VERTICAL);
-        applyInsetsAwarePadding(bar, 16, 10, 16, 14);
+        applyInsetsAwarePadding(bar, 16, 8, 16, 10);
         bar.setBackgroundColor(Color.WHITE);
         if (Build.VERSION.SDK_INT >= 21) bar.setElevation(dp(8));
         return bar;
@@ -313,7 +312,7 @@ public class MainActivity extends Activity {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(16), dp(adaptive(28, 34, 40)), dp(16), dp(12));
+        header.setPadding(dp(16), dp(adaptive(34, 42, 50)), dp(16), dp(12));
         header.setBackgroundColor(Color.WHITE);
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
@@ -326,22 +325,30 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         merchantListView = new LinearLayout(this);
         merchantListView.setOrientation(LinearLayout.VERTICAL);
-        merchantListView.setPadding(dp(16), dp(12), dp(16), dp(12));
+        merchantListView.setPadding(dp(16), dp(12), dp(16), dp(8));
         scroll.addView(merchantListView);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout bar = bottomBar();
         root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout searchRow = horizontalRow();
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView searchIcon = centerText("⌕", 20, MUTED, Typeface.BOLD);
+        searchIcon.setBackground(borderedBg(Color.rgb(248, 250, 252), 12, LINE));
+        searchRow.addView(searchIcon, new LinearLayout.LayoutParams(dp(48), dp(48)));
         searchInput = input("Cari toko, email, atau grup", false);
-        bar.addView(searchInput, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(0, dp(48), 1);
+        searchLp.setMargins(dp(8), 0, 0, 0);
+        searchRow.addView(searchInput, searchLp);
+        bar.addView(searchRow, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout bottomRow = horizontalRow();
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
-        rowLp.setMargins(0, dp(8), 0, 0);
+        rowLp.setMargins(0, dp(6), 0, 0);
         bar.addView(bottomRow, rowLp);
-        refreshButton = secondaryButton("Refresh Toko");
-        clearSearchButton = secondaryButton("Clear Search");
-        bottomRow.addView(refreshButton, new LinearLayout.LayoutParams(0, -2, 1));
-        LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(0, -2, 1);
+        refreshButton = secondaryButton("Refresh");
+        clearSearchButton = secondaryButton("Clear");
+        bottomRow.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         clearLp.setMargins(dp(8), 0, 0, 0);
         bottomRow.addView(clearSearchButton, clearLp);
 
@@ -383,7 +390,7 @@ public class MainActivity extends Activity {
             shown++;
             LinearLayout c = storeCard();
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.setMargins(0, 0, 0, dp(10));
+            lp.setMargins(0, 0, 0, dp(12));
             merchantListView.addView(c, lp);
 
             LinearLayout row = horizontalRow();
@@ -397,10 +404,20 @@ public class MainActivity extends Activity {
             storeTitle.setMaxLines(2);
             storeTitle.setEllipsize(TextUtils.TruncateAt.END);
             info.addView(storeTitle);
-            if (!m.email.isEmpty()) info.addView(text(maskEmail(m.email), 12, MUTED, Typeface.NORMAL));
+            if (!m.email.isEmpty()) {
+                TextView email = text(maskEmail(m.email), 12, MUTED, Typeface.NORMAL);
+                email.setPadding(0, dp(2), 0, 0);
+                info.addView(email);
+            }
             String meta = joinNonEmpty(m.groupTitle, m.employeeName);
-            if (!meta.isEmpty()) info.addView(text(meta, 12, MUTED, Typeface.NORMAL));
-            info.addView(text(m.hasCookie() ? "Siap masuk Akulaku" : "Cookie diambil saat masuk", 11, m.hasCookie() ? SUCCESS : DANGER, Typeface.BOLD));
+            if (!meta.isEmpty()) {
+                TextView metaText = text(meta, 12, MUTED, Typeface.NORMAL);
+                metaText.setPadding(0, dp(1), 0, 0);
+                info.addView(metaText);
+            }
+            TextView state = text(m.hasCookie() ? "Siap masuk Akulaku" : "Cookie diambil saat masuk", 12, m.hasCookie() ? SUCCESS : DANGER, Typeface.BOLD);
+            state.setPadding(0, dp(4), 0, 0);
+            info.addView(state);
 
             Button open = primaryButton("Masuk");
             LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(dp(adaptive(96, 104, 112)), dp(48));
@@ -438,7 +455,7 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(90);
         settings.setDefaultZoom(WebSettings.ZoomDensity.FAR);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.1");
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.2");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setInitialScale(webScale);
         webView.setWebViewClient(new WebViewClient() {
@@ -457,30 +474,25 @@ public class MainActivity extends Activity {
         Button back = secondaryButton("< Toko");
         Button home = primaryButton("Home");
         Button reload = secondaryButton("Reload");
-        row1.addView(back, new LinearLayout.LayoutParams(0, -2, 1));
-        LinearLayout.LayoutParams homeLp = new LinearLayout.LayoutParams(0, -2, 1);
+        row1.addView(back, new LinearLayout.LayoutParams(0, dp(48), 1));
+        LinearLayout.LayoutParams homeLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         homeLp.setMargins(dp(8), 0, dp(8), 0);
         row1.addView(home, homeLp);
-        row1.addView(reload, new LinearLayout.LayoutParams(0, -2, 1));
+        row1.addView(reload, new LinearLayout.LayoutParams(0, dp(48), 1));
         bar.addView(row1, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout row2 = horizontalRow();
         LinearLayout.LayoutParams row2Lp = new LinearLayout.LayoutParams(-1, -2);
-        row2Lp.setMargins(0, dp(7), 0, 0);
+        row2Lp.setMargins(0, dp(6), 0, 0);
         bar.addView(row2, row2Lp);
-        Button zoomOut = secondaryButton("Zoom -");
+        Button zoomOut = secondaryButton("−");
         Button fit = secondaryButton("Fit");
-        Button zoomIn = secondaryButton("Zoom +");
-        row2.addView(zoomOut, new LinearLayout.LayoutParams(0, -2, 1));
-        LinearLayout.LayoutParams fitLp = new LinearLayout.LayoutParams(0, -2, 1);
+        Button zoomIn = secondaryButton("+");
+        row2.addView(zoomOut, new LinearLayout.LayoutParams(0, dp(48), 1));
+        LinearLayout.LayoutParams fitLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         fitLp.setMargins(dp(8), 0, dp(8), 0);
         row2.addView(fit, fitLp);
-        row2.addView(zoomIn, new LinearLayout.LayoutParams(0, -2, 1));
-
-        TextView hint = centerText("Pindah toko: < Toko lalu pilih toko lain", 11, MUTED, Typeface.NORMAL);
-        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
-        hintLp.setMargins(0, dp(4), 0, 0);
-        bar.addView(hint, hintLp);
+        row2.addView(zoomIn, new LinearLayout.LayoutParams(0, dp(48), 1));
 
         back.setOnClickListener(v -> showMerchantScreen());
         home.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
@@ -633,7 +645,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.1");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.2");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }

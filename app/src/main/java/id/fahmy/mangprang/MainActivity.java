@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.Gravity;
-import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -14,7 +13,6 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONObject;
@@ -29,6 +27,8 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final String AKULAKU_URL = "https://ec-vendor.akulaku.com/ec-vendor/";
+    private static final String TRACSH_LOGIN_URL = "https://tracsh.com/auth/signIn";
+    private static final String TRACSH_COOKIE_URL = "https://tracsh.com";
     private static final String TRACSH_UPDATE_URL = "https://tracsh.com/api/updateCookie";
 
     private WebView webView;
@@ -66,12 +66,17 @@ public class MainActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
 
         Button openAkulaku = new Button(this);
-        openAkulaku.setText("Buka Akulaku");
+        openAkulaku.setText("Akulaku");
         openAkulaku.setOnClickListener(v -> webView.loadUrl(AKULAKU_URL));
         row.addView(openAkulaku, new LinearLayout.LayoutParams(0, -2, 1));
 
+        Button openTracsh = new Button(this);
+        openTracsh.setText("Tracsh");
+        openTracsh.setOnClickListener(v -> webView.loadUrl(TRACSH_LOGIN_URL));
+        row.addView(openTracsh, new LinearLayout.LayoutParams(0, -2, 1));
+
         Button readCookie = new Button(this);
-        readCookie.setText("Baca Cookie");
+        readCookie.setText("Baca");
         readCookie.setOnClickListener(v -> readCookie());
         row.addView(readCookie, new LinearLayout.LayoutParams(0, -2, 1));
 
@@ -83,7 +88,7 @@ public class MainActivity extends Activity {
         controls.addView(row, new LinearLayout.LayoutParams(-1, -2));
 
         statusText = new TextView(this);
-        statusText.setText("Login Akulaku di WebView ini, isi Merchant ID, lalu Baca Cookie dan Sync.");
+        statusText.setText("Login Akulaku dan Tracsh di WebView ini, isi Merchant ID, lalu Baca Cookie dan Sync.");
         statusText.setTextColor(Color.rgb(51, 65, 85));
         statusText.setPadding(0, 8, 0, 0);
         controls.addView(statusText, new LinearLayout.LayoutParams(-1, -2));
@@ -94,7 +99,7 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.1.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.1.1");
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setWebViewClient(new WebViewClient());
@@ -103,6 +108,15 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         webView.loadUrl(AKULAKU_URL);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack();
+            return;
+        }
+        super.onBackPressed();
     }
 
     private void readCookie() {
@@ -125,7 +139,12 @@ public class MainActivity extends Activity {
         if (lastCookie.isEmpty()) readCookie();
         if (lastCookie.isEmpty()) return;
 
-        setStatus("Mengirim cookie ke Tracsh...");
+        String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_COOKIE_URL);
+        boolean hasTracshSession = tracshCookie != null && !tracshCookie.trim().isEmpty();
+
+        setStatus(hasTracshSession
+            ? "Mengirim cookie ke Tracsh dengan session WebView..."
+            : "Mengirim cookie ke Tracsh tanpa session login. Kalau gagal, buka Tracsh lalu login dulu.");
         new Thread(() -> {
             try {
                 JSONObject body = new JSONObject();
@@ -138,13 +157,15 @@ public class MainActivity extends Activity {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setRequestProperty("Accept", "application/json, text/plain, */*");
+                if (hasTracshSession) conn.setRequestProperty("Cookie", tracshCookie);
                 conn.setDoOutput(true);
                 byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream os = conn.getOutputStream()) { os.write(payload); }
                 int code = conn.getResponseCode();
+                String suffix = hasTracshSession ? " Session Tracsh terdeteksi." : " Session Tracsh belum terdeteksi.";
                 runOnUiThread(() -> setStatus(code >= 200 && code < 300
-                    ? "Sync berhasil. HTTP " + code
-                    : "Sync belum berhasil. HTTP " + code + ". Cek session/akses Tracsh."));
+                    ? "Sync berhasil. HTTP " + code + "." + suffix
+                    : "Sync belum berhasil. HTTP " + code + ". Login Tracsh di tombol Tracsh lalu coba lagi." + suffix));
             } catch (Exception e) {
                 runOnUiThread(() -> setStatus("Sync error: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
             }

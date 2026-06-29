@@ -4,7 +4,7 @@ Android APK helper internal PT FahmyID untuk login Tracsh, menampilkan daftar to
 
 ## Status
 
-Versi v0.2.2 native Android WebView. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa switch toko Akulaku dari HP Android lewat akun Tracsh.
+Versi v0.2.3 native Android WebView. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa switch toko Akulaku dari HP Android lewat akun Tracsh.
 
 ## Cara Build
 

@@ -7,6 +7,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Build;
+import android.view.WindowInsets;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -73,8 +74,9 @@ public class MainActivity extends Activity {
     private Button refreshButton;
     private Button clearSearchButton;
     private WebView webView;
-    private int webScale = 72;
+    private int webScale = 100;
     private int screenMode = 1;
+    private int statusTopInset = 0;
     private int navBottomInset = 0;
     private boolean loggedInToTracsh = false;
     private boolean enteringStore = false;
@@ -106,9 +108,10 @@ public class MainActivity extends Activity {
         Window window = getWindow();
         window.setStatusBarColor(BG);
         window.setNavigationBarColor(Color.WHITE);
-        if (Build.VERSION.SDK_INT >= 23) {
-            window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-        }
+        int flags = 0;
+        if (Build.VERSION.SDK_INT >= 23) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        if (Build.VERSION.SDK_INT >= 26) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        window.getDecorView().setSystemUiVisibility(flags);
     }
 
     private GradientDrawable bg(int color, int radiusDp) {
@@ -125,13 +128,23 @@ public class MainActivity extends Activity {
     }
 
     private void applyInsetsAwarePadding(View view, int left, int top, int right, int bottom) {
-        view.setPadding(dp(left), dp(top), dp(right), dp(bottom) + navBottomInset);
+        applyInsetsAwarePadding(view, left, top, right, bottom, false, true);
+    }
+
+    private void applyInsetsAwarePadding(View view, int left, int top, int right, int bottom, boolean includeTop, boolean includeBottom) {
+        int resolvedTop = dp(top) + (includeTop ? statusTopInset : 0);
+        int resolvedBottom = dp(bottom) + (includeBottom ? navBottomInset : 0);
+        view.setPadding(dp(left), resolvedTop, dp(right), resolvedBottom);
         if (Build.VERSION.SDK_INT >= 20) {
             view.setOnApplyWindowInsetsListener((v, insets) -> {
+                statusTopInset = insets.getSystemWindowInsetTop();
                 navBottomInset = insets.getSystemWindowInsetBottom();
-                v.setPadding(dp(left), dp(top), dp(right), dp(bottom) + navBottomInset);
+                int t = dp(top) + (includeTop ? statusTopInset : 0);
+                int b = dp(bottom) + (includeBottom ? navBottomInset : 0);
+                v.setPadding(dp(left), t, dp(right), b);
                 return insets;
             });
+            view.requestApplyInsets();
         }
     }
 
@@ -141,6 +154,7 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         setContentView(root);
+        if (Build.VERSION.SDK_INT >= 20) root.requestApplyInsets();
     }
 
     private TextView text(String value, int sp, int color, int style) {
@@ -231,7 +245,7 @@ public class MainActivity extends Activity {
     private LinearLayout bottomBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.VERTICAL);
-        applyInsetsAwarePadding(bar, 16, 8, 16, 10);
+        applyInsetsAwarePadding(bar, 16, 6, 16, 8, false, true);
         bar.setBackgroundColor(Color.WHITE);
         if (Build.VERSION.SDK_INT >= 21) bar.setElevation(dp(8));
         return bar;
@@ -251,7 +265,7 @@ public class MainActivity extends Activity {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setGravity(Gravity.CENTER_HORIZONTAL);
-        wrap.setPadding(dp(adaptive(18, 24, 30)), dp(adaptive(16, 24, 34)), dp(adaptive(18, 24, 30)), dp(adaptive(14, 20, 28)));
+        applyInsetsAwarePadding(wrap, adaptive(18, 24, 30), adaptive(12, 18, 24), adaptive(18, 24, 30), adaptive(12, 16, 20), true, true);
         root.addView(wrap, new LinearLayout.LayoutParams(-1, -1));
 
         wrap.addView(flexSpacer(screenMode == 0 ? 0.35f : 0.8f));
@@ -312,7 +326,7 @@ public class MainActivity extends Activity {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(16), dp(adaptive(34, 42, 50)), dp(16), dp(12));
+        applyInsetsAwarePadding(header, 16, adaptive(12, 14, 16), 16, 12, true, false);
         header.setBackgroundColor(Color.WHITE);
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
@@ -453,9 +467,9 @@ public class MainActivity extends Activity {
         settings.setSupportZoom(true);
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
-        settings.setTextZoom(90);
-        settings.setDefaultZoom(WebSettings.ZoomDensity.FAR);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.2");
+        settings.setTextZoom(100);
+        settings.setDefaultZoom(WebSettings.ZoomDensity.MEDIUM);
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.3");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setInitialScale(webScale);
         webView.setWebViewClient(new WebViewClient() {
@@ -498,7 +512,7 @@ public class MainActivity extends Activity {
         home.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
         reload.setOnClickListener(v -> webView.reload());
         zoomOut.setOnClickListener(v -> setWebScale(webScale - 10));
-        fit.setOnClickListener(v -> setWebScale(72));
+        fit.setOnClickListener(v -> setWebScale(100));
         zoomIn.setOnClickListener(v -> setWebScale(webScale + 10));
     }
 
@@ -516,8 +530,8 @@ public class MainActivity extends Activity {
     private void injectAkulakuDesktopFit(WebView view) {
         String js = "(function(){" +
             "var head=document.head||document.getElementsByTagName('head')[0];" +
-            "if(head&&!document.getElementById('mangprang-viewport')){var m=document.createElement('meta');m.id='mangprang-viewport';m.name='viewport';m.content='width=1200, initial-scale=0.35, minimum-scale=0.25, maximum-scale=2.5, user-scalable=yes';head.appendChild(m);}" +
-            "if(head&&!document.getElementById('mangprang-style')){var s=document.createElement('style');s.id='mangprang-style';s.innerHTML='html,body{min-width:1100px!important;overflow:auto!important;-webkit-text-size-adjust:85%!important;} table,.ant-table,.el-table{font-size:12px!important;} input,button,select,textarea{font-size:13px!important;} .ant-layout,.el-container{min-width:1100px!important;}';head.appendChild(s);}" +
+            "if(head&&!document.getElementById('mangprang-viewport')){var m=document.createElement('meta');m.id='mangprang-viewport';m.name='viewport';m.content='width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=3.0, user-scalable=yes, viewport-fit=cover';head.appendChild(m);}" +
+            "if(head&&!document.getElementById('mangprang-style')){var s=document.createElement('style');s.id='mangprang-style';s.innerHTML='html,body{width:100%!important;min-height:100%!important;overflow:auto!important;-webkit-text-size-adjust:100%!important;} table,.ant-table,.el-table{font-size:12px!important;} input,button,select,textarea{font-size:13px!important;} img,video{max-width:100%!important;}';head.appendChild(s);}" +
             "})();";
         view.evaluateJavascript(js, null);
     }
@@ -645,7 +659,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.2");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.3");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }

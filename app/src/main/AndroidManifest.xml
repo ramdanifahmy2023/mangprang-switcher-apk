@@ -4,6 +4,8 @@
     <application
         android:allowBackup="false"
         android:label="@string/app_name"
+        android:icon="@drawable/ic_mangprang"
+        android:roundIcon="@drawable/ic_mangprang"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
         <activity

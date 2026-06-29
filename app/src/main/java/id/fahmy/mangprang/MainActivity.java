@@ -76,8 +76,10 @@ public class MainActivity extends Activity {
     private WebView webView;
     private int webScale = 100;
     private int screenMode = 1;
-    private int statusTopInset = 0;
-    private int navBottomInset = 0;
+    private int safeLeftInset = 0;
+    private int safeTopInset = 0;
+    private int safeRightInset = 0;
+    private int safeBottomInset = 0;
     private boolean loggedInToTracsh = false;
     private boolean enteringStore = false;
     private final List<Merchant> merchants = new ArrayList<>();
@@ -128,24 +130,34 @@ public class MainActivity extends Activity {
     }
 
     private void applyInsetsAwarePadding(View view, int left, int top, int right, int bottom) {
-        applyInsetsAwarePadding(view, left, top, right, bottom, false, true);
+        applyInsetsAwarePadding(view, left, top, right, bottom, false, true, true);
     }
 
     private void applyInsetsAwarePadding(View view, int left, int top, int right, int bottom, boolean includeTop, boolean includeBottom) {
-        int resolvedTop = dp(top) + (includeTop ? statusTopInset : 0);
-        int resolvedBottom = dp(bottom) + (includeBottom ? navBottomInset : 0);
-        view.setPadding(dp(left), resolvedTop, dp(right), resolvedBottom);
+        applyInsetsAwarePadding(view, left, top, right, bottom, includeTop, includeBottom, true);
+    }
+
+    private void applyInsetsAwarePadding(View view, int left, int top, int right, int bottom, boolean includeTop, boolean includeBottom, boolean includeHorizontal) {
+        setResolvedPadding(view, left, top, right, bottom, includeTop, includeBottom, includeHorizontal);
         if (Build.VERSION.SDK_INT >= 20) {
             view.setOnApplyWindowInsetsListener((v, insets) -> {
-                statusTopInset = insets.getSystemWindowInsetTop();
-                navBottomInset = insets.getSystemWindowInsetBottom();
-                int t = dp(top) + (includeTop ? statusTopInset : 0);
-                int b = dp(bottom) + (includeBottom ? navBottomInset : 0);
-                v.setPadding(dp(left), t, dp(right), b);
+                safeLeftInset = insets.getSystemWindowInsetLeft();
+                safeTopInset = insets.getSystemWindowInsetTop();
+                safeRightInset = insets.getSystemWindowInsetRight();
+                safeBottomInset = insets.getSystemWindowInsetBottom();
+                setResolvedPadding(v, left, top, right, bottom, includeTop, includeBottom, includeHorizontal);
                 return insets;
             });
             view.requestApplyInsets();
         }
+    }
+
+    private void setResolvedPadding(View view, int left, int top, int right, int bottom, boolean includeTop, boolean includeBottom, boolean includeHorizontal) {
+        int l = dp(left) + (includeHorizontal ? safeLeftInset : 0);
+        int t = dp(top) + (includeTop ? safeTopInset : 0);
+        int r = dp(right) + (includeHorizontal ? safeRightInset : 0);
+        int b = dp(bottom) + (includeBottom ? safeBottomInset : 0);
+        view.setPadding(l, t, r, b);
     }
 
     private void baseRoot() {
@@ -195,6 +207,15 @@ public class MainActivity extends Activity {
         btn.setAllCaps(false);
         btn.setMinHeight(dp(48));
         btn.setPadding(dp(10), dp(8), dp(10), dp(8));
+        return btn;
+    }
+
+    private Button compactButton(String value) {
+        Button btn = secondaryButton(value);
+        btn.setTextSize(12);
+        btn.setMinHeight(dp(40));
+        btn.setMinimumHeight(dp(40));
+        btn.setPadding(dp(8), dp(4), dp(8), dp(4));
         return btn;
     }
 
@@ -455,6 +476,7 @@ public class MainActivity extends Activity {
         baseRoot();
 
         FrameLayout webWrap = new FrameLayout(this);
+        applyInsetsAwarePadding(webWrap, 0, 0, 0, 0, true, false, true);
         root.addView(webWrap, new LinearLayout.LayoutParams(-1, 0, 1));
 
         webView = new WebView(this);
@@ -469,7 +491,7 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(100);
         settings.setDefaultZoom(WebSettings.ZoomDensity.MEDIUM);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.3");
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.4");
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setInitialScale(webScale);
         webView.setWebViewClient(new WebViewClient() {
@@ -499,14 +521,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams row2Lp = new LinearLayout.LayoutParams(-1, -2);
         row2Lp.setMargins(0, dp(6), 0, 0);
         bar.addView(row2, row2Lp);
-        Button zoomOut = secondaryButton("−");
-        Button fit = secondaryButton("Fit");
-        Button zoomIn = secondaryButton("+");
-        row2.addView(zoomOut, new LinearLayout.LayoutParams(0, dp(48), 1));
-        LinearLayout.LayoutParams fitLp = new LinearLayout.LayoutParams(0, dp(48), 1);
+        Button zoomOut = compactButton("−");
+        Button fit = compactButton("Fit");
+        Button zoomIn = compactButton("+");
+        row2.addView(zoomOut, new LinearLayout.LayoutParams(0, dp(40), 1));
+        LinearLayout.LayoutParams fitLp = new LinearLayout.LayoutParams(0, dp(40), 1);
         fitLp.setMargins(dp(8), 0, dp(8), 0);
         row2.addView(fit, fitLp);
-        row2.addView(zoomIn, new LinearLayout.LayoutParams(0, dp(48), 1));
+        row2.addView(zoomIn, new LinearLayout.LayoutParams(0, dp(40), 1));
 
         back.setOnClickListener(v -> showMerchantScreen());
         home.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
@@ -530,8 +552,8 @@ public class MainActivity extends Activity {
     private void injectAkulakuDesktopFit(WebView view) {
         String js = "(function(){" +
             "var head=document.head||document.getElementsByTagName('head')[0];" +
-            "if(head&&!document.getElementById('mangprang-viewport')){var m=document.createElement('meta');m.id='mangprang-viewport';m.name='viewport';m.content='width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=3.0, user-scalable=yes, viewport-fit=cover';head.appendChild(m);}" +
-            "if(head&&!document.getElementById('mangprang-style')){var s=document.createElement('style');s.id='mangprang-style';s.innerHTML='html,body{width:100%!important;min-height:100%!important;overflow:auto!important;-webkit-text-size-adjust:100%!important;} table,.ant-table,.el-table{font-size:12px!important;} input,button,select,textarea{font-size:13px!important;} img,video{max-width:100%!important;}';head.appendChild(s);}" +
+            "if(head){var m=document.querySelector('meta[name=viewport]')||document.createElement('meta');m.id='mangprang-viewport';m.name='viewport';m.content='width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=3.0, user-scalable=yes, viewport-fit=cover';if(!m.parentNode)head.appendChild(m);}" +
+            "if(head&&!document.getElementById('mangprang-style')){var s=document.createElement('style');s.id='mangprang-style';s.innerHTML='html,body{width:100%!important;min-height:100%!important;height:auto!important;overflow:auto!important;-webkit-text-size-adjust:100%!important;} #app,.app,.ant-layout,.el-container{max-width:100vw!important;} table,.ant-table,.el-table{font-size:12px!important;max-width:100%!important;} input,button,select,textarea{font-size:13px!important;} img,video{max-width:100%!important;}';head.appendChild(s);}" +
             "})();";
         view.evaluateJavascript(js, null);
     }
@@ -659,7 +681,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.3");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.4");
         String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }

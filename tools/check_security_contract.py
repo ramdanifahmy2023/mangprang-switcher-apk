@@ -20,8 +20,11 @@ checks = {
     "cookie endpoint receives row identity": 'body.put("tracsh_row_id", merchant.id)' in activity,
     "merchant list does not copy cookie": 'm.cookie = ""' in activity,
     "network timeout bounded": "NETWORK_TIMEOUT_MS = 15_000" in activity,
+    "WebView timeout bounded": "WEBVIEW_TIMEOUT_MS = 30_000" in activity,
     "SSL errors are cancelled": "handler.cancel()" in activity,
     "WebView debugging disabled": "setWebContentsDebuggingEnabled(false)" in activity,
+    "response ownership checked": "responseMerchantId.equals(merchant.merchantId)" in activity,
+    "cookie writes fail closed": "if (!ok)" in activity,
 }
 
 for name, ok in checks.items():

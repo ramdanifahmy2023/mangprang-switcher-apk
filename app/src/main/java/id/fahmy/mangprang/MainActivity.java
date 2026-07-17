@@ -9,6 +9,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Insets;
 import android.view.WindowInsets;
 import android.text.Editable;
@@ -69,6 +71,7 @@ public class MainActivity extends Activity {
     private static final String AKULAKU_COOKIE_URL = "https://ec-vendor.akulaku.com";
     private static final String AKULAKU_VENDOR_URL = "https://ec-vendor.akulaku.com/ec-vendor/";
     private static final int NETWORK_TIMEOUT_MS = 15_000;
+    private static final int WEBVIEW_TIMEOUT_MS = 30_000;
     private static final Pattern COOKIE_NAME = Pattern.compile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$");
     private static final Set<String> COOKIE_ATTRIBUTES = Collections.unmodifiableSet(new HashSet<String>() {{
         add("domain"); add("path"); add("expires"); add("max-age"); add("secure");
@@ -112,6 +115,14 @@ public class MainActivity extends Activity {
     private volatile boolean destroyed = false;
     private String activeMerchantTitle = "";
     private String currentScreen = "login";
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private int webNavigationToken = 0;
+    private final Runnable webLoadTimeout = () -> {
+        if (webView != null && "akulaku".equals(currentScreen) && webProgress != null && webProgress.getVisibility() == View.VISIBLE) {
+            webView.stopLoading();
+            showWebError("Akulaku terlalu lama merespons. Tekan Reload untuk mencoba lagi.");
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -573,6 +584,9 @@ public class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 if (!isAllowedWebUrl(url)) { view.stopLoading(); showWebError("Blokir URL di luar Akulaku."); return; }
+                webNavigationToken++;
+                mainHandler.removeCallbacks(webLoadTimeout);
+                mainHandler.postDelayed(webLoadTimeout, WEBVIEW_TIMEOUT_MS);
                 setWebLoading(true, "Memuat Akulaku...");
                 super.onPageStarted(view, url, favicon);
             }
@@ -581,13 +595,17 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (!isAllowedWebUrl(url)) return;
+                mainHandler.removeCallbacks(webLoadTimeout);
                 setWebLoading(false, "Toko aktif: " + activeMerchantTitle);
                 injectAkulakuDesktopFit(view);
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) showWebError("Gagal memuat Akulaku. Periksa koneksi lalu tekan Reload.");
+                if (request.isForMainFrame()) {
+                    mainHandler.removeCallbacks(webLoadTimeout);
+                    showWebError("Gagal memuat Akulaku. Periksa koneksi lalu tekan Reload.");
+                }
                 super.onReceivedError(view, request, error);
             }
 
@@ -633,8 +651,8 @@ public class MainActivity extends Activity {
         row2.addView(zoomIn, new LinearLayout.LayoutParams(0, dp(40), 1));
 
         back.setOnClickListener(v -> showMerchantScreen());
-        home.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
-        reload.setOnClickListener(v -> { if (webView != null) webView.reload(); });
+        home.setOnClickListener(v -> loadAkulakuUrl(AKULAKU_VENDOR_URL));
+        reload.setOnClickListener(v -> { if (webView != null) loadAkulakuUrl(webView.getUrl()); });
         zoomOut.setOnClickListener(v -> setWebScale(webScale - 10));
         fit.setOnClickListener(v -> setWebScale(100));
         zoomIn.setOnClickListener(v -> setWebScale(webScale + 10));
@@ -655,7 +673,17 @@ public class MainActivity extends Activity {
     }
 
     private void showWebError(String message) {
+        mainHandler.removeCallbacks(webLoadTimeout);
         setWebLoading(false, message);
+    }
+
+    private void loadAkulakuUrl(String url) {
+        if (webView == null) return;
+        String target = isAllowedWebUrl(url) ? url : AKULAKU_VENDOR_URL;
+        webNavigationToken++;
+        mainHandler.removeCallbacks(webLoadTimeout);
+        setWebLoading(true, "Memuat Akulaku...");
+        webView.loadUrl(target);
     }
 
     private void setWebScale(int scale) {
@@ -795,7 +823,12 @@ public class MainActivity extends Activity {
                     activeMerchantTitle = merchant.title;
                     if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
                     showAkulakuScreen();
-                    if (webView != null) webView.loadUrl(AKULAKU_VENDOR_URL);
+                    loadAkulakuUrl(AKULAKU_VENDOR_URL);
+                }, () -> {
+                    enteringStore = false;
+                    if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
+                    if (progress != null) progress.setVisibility(View.GONE);
+                    if (statusText != null) statusText.setText("Cookie toko gagal dipasang. Coba masuk lagi.");
                 }));
             } catch (Exception e) {
                 if (!isRequestCurrent(generation)) return;
@@ -826,7 +859,14 @@ public class MainActivity extends Activity {
             saveCookies(conn);
             if (code < 200 || code >= 300) return "";
             JSONObject data = new JSONObject(readResponse(conn));
-            return data.optString("cookie", data.optString("data", ""));
+            String responseMerchantId = data.optString("merchantId", "").trim();
+            String responseRowId = data.optString("tracshRowId", "").trim();
+            boolean merchantMatches = responseMerchantId.isEmpty() || merchant.merchantId.isEmpty()
+                || responseMerchantId.equals(merchant.merchantId);
+            boolean rowMatches = responseRowId.isEmpty() || merchant.id.isEmpty()
+                || responseRowId.equals(merchant.id);
+            if (!merchantMatches || !rowMatches || !"success".equalsIgnoreCase(data.optString("status", "success"))) return "";
+            return data.optString("cookie", "").trim();
         } finally { closeConnection(conn); }
     }
 
@@ -967,16 +1007,26 @@ public class MainActivity extends Activity {
         return obj.has("merchantId") || obj.has("merchant_id") || obj.has("mid") || obj.has("title") || obj.has("storeName") || obj.has("accountUsername");
     }
 
-    private void setCookieHeaders(String url, List<String> headers, int index, Runnable completion) {
-        if (index >= headers.size()) { CookieManager.getInstance().flush(); if (completion != null) completion.run(); return; }
-        CookieManager.getInstance().setCookie(url, headers.get(index), ok -> setCookieHeaders(url, headers, index + 1, completion));
+    private void setCookieHeaders(String url, List<String> headers, int index, Runnable completion, Runnable failure) {
+        if (index >= headers.size()) {
+            CookieManager.getInstance().flush();
+            if (completion != null) completion.run();
+            return;
+        }
+        CookieManager.getInstance().setCookie(url, headers.get(index), ok -> {
+            if (!ok) {
+                if (failure != null) failure.run();
+                return;
+            }
+            setCookieHeaders(url, headers, index + 1, completion, failure);
+        });
     }
 
-    private void prepareIsolatedCookies(String cookieHeader, Runnable completion) {
-        clearAllCookies(() -> applyAkulakuCookie(cookieHeader, completion));
+    private void prepareIsolatedCookies(String cookieHeader, Runnable completion, Runnable failure) {
+        clearAllCookies(() -> applyAkulakuCookie(cookieHeader, completion, failure));
     }
 
-    private void applyAkulakuCookie(String cookieHeader, Runnable completion) {
+    private void applyAkulakuCookie(String cookieHeader, Runnable completion, Runnable failure) {
         List<String> safeCookies = new ArrayList<>();
         for (String part : cookieHeader.split(";")) {
             String[] pair = part.trim().split("=", 2);
@@ -985,7 +1035,8 @@ public class MainActivity extends Activity {
             if (value.isEmpty()) continue;
             safeCookies.add(pair[0].trim() + '=' + value + "; Path=/; Secure");
         }
-        setCookieHeaders(AKULAKU_COOKIE_URL, safeCookies, 0, completion);
+        if (safeCookies.isEmpty()) { if (failure != null) failure.run(); return; }
+        setCookieHeaders(AKULAKU_COOKIE_URL, safeCookies, 0, completion, failure);
     }
 
     private void clearAllCookies(Runnable completion) {
@@ -1003,6 +1054,10 @@ public class MainActivity extends Activity {
         clearAllCookies(() -> {
             loggedInToTracsh = false;
             tracshCookies.clear();
+            merchants.clear();
+            activeMerchantTitle = "";
+            if (usernameInput != null) usernameInput.setText("");
+            if (passwordInput != null) passwordInput.setText("");
             showLoginScreen();
         });
     }
@@ -1022,6 +1077,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         destroyed = true;
         requestGeneration.incrementAndGet();
+        mainHandler.removeCallbacks(webLoadTimeout);
         for (HttpURLConnection conn : new ArrayList<>(activeConnections)) closeConnection(conn);
         destroyWebView();
         super.onDestroy();
@@ -1050,7 +1106,7 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if ("akulaku".equals(currentScreen) && webView != null && webView.canGoBack()) { webView.goBack(); return; }
-        if ("akulaku".equals(currentScreen)) { destroyWebView(); showMerchantScreen(); return; }
+        if ("akulaku".equals(currentScreen)) { requestGeneration.incrementAndGet(); mainHandler.removeCallbacks(webLoadTimeout); destroyWebView(); showMerchantScreen(); return; }
         if ("merchant".equals(currentScreen)) {
             if (loggedInToTracsh) {
                 new AlertDialog.Builder(this)

@@ -2,9 +2,11 @@ package id.fahmy.mangprang;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.graphics.Insets;
@@ -18,10 +20,15 @@ import android.view.Gravity;
 import android.view.Window;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.net.http.SslError;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -34,6 +41,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -42,8 +50,14 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -54,6 +68,12 @@ public class MainActivity extends Activity {
     private static final String MERCHANT_COOKIE_ENDPOINT = TRACSH_BASE_URL + "/api/getMerchantCookie";
     private static final String AKULAKU_COOKIE_URL = "https://ec-vendor.akulaku.com";
     private static final String AKULAKU_VENDOR_URL = "https://ec-vendor.akulaku.com/ec-vendor/";
+    private static final int NETWORK_TIMEOUT_MS = 15_000;
+    private static final Pattern COOKIE_NAME = Pattern.compile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$");
+    private static final Set<String> COOKIE_ATTRIBUTES = Collections.unmodifiableSet(new HashSet<String>() {{
+        add("domain"); add("path"); add("expires"); add("max-age"); add("secure");
+        add("httponly"); add("samesite"); add("priority"); add("partitioned");
+    }});
 
     private static final int BG = Color.rgb(241, 245, 249);
     private static final int CARD = Color.WHITE;
@@ -75,6 +95,8 @@ public class MainActivity extends Activity {
     private Button refreshButton;
     private Button clearSearchButton;
     private WebView webView;
+    private TextView webStatusText;
+    private ProgressBar webProgress;
     private int webScale = 100;
     private int screenMode = 1;
     private int safeLeftInset = 0;
@@ -84,15 +106,22 @@ public class MainActivity extends Activity {
     private boolean loggedInToTracsh = false;
     private boolean enteringStore = false;
     private final List<Merchant> merchants = new ArrayList<>();
+    private final Map<String, String> tracshCookies = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Set<HttpURLConnection> activeConnections = Collections.synchronizedSet(new HashSet<>());
+    private final AtomicInteger requestGeneration = new AtomicInteger();
+    private volatile boolean destroyed = false;
+    private String activeMerchantTitle = "";
     private String currentScreen = "login";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         CookieManager.getInstance().setAcceptCookie(true);
+        WebView.setWebContentsDebuggingEnabled(false);
         configureSystemBars();
         computeScreenMode();
         showLoginScreen();
+        clearAllCookies(null);
     }
 
     private void computeScreenMode() {
@@ -175,6 +204,8 @@ public class MainActivity extends Activity {
     }
 
     private void baseRoot() {
+        requestGeneration.incrementAndGet();
+        destroyWebView();
         computeScreenMode();
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -396,13 +427,18 @@ public class MainActivity extends Activity {
         bar.addView(bottomRow, rowLp);
         refreshButton = secondaryButton("Refresh");
         clearSearchButton = secondaryButton("Clear");
+        Button logoutButton = secondaryButton("Logout");
         bottomRow.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(48), 1));
         LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         clearLp.setMargins(dp(8), 0, 0, 0);
         bottomRow.addView(clearSearchButton, clearLp);
+        LinearLayout.LayoutParams logoutLp = new LinearLayout.LayoutParams(0, dp(48), 1);
+        logoutLp.setMargins(dp(8), 0, 0, 0);
+        bottomRow.addView(logoutButton, logoutLp);
 
         refreshButton.setOnClickListener(v -> fetchMerchants());
         clearSearchButton.setOnClickListener(v -> searchInput.setText(""));
+        logoutButton.setOnClickListener(v -> logoutSession());
         searchInput.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             public void onTextChanged(CharSequence value, int start, int before, int count) { renderMerchantList(value.toString()); }
@@ -497,7 +533,12 @@ public class MainActivity extends Activity {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
+        settings.setDatabaseEnabled(false);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(false);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setSupportZoom(true);
@@ -505,14 +546,55 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(100);
         settings.setDefaultZoom(WebSettings.ZoomDensity.MEDIUM);
-        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.5");
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        settings.setUserAgentString(settings.getUserAgentString() + " MangprangSwitcherApk/0.3.6");
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         webView.setInitialScale(webScale);
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                boolean blocked = !isAllowedWebUrl(request.getUrl().toString());
+                if (blocked) showWebError("Blokir URL di luar Akulaku.");
+                return blocked;
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                boolean blocked = !isAllowedWebUrl(url);
+                if (blocked) showWebError("Blokir URL di luar Akulaku.");
+                return blocked;
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                if (isAllowedWebUrl(request.getUrl().toString())) return super.shouldInterceptRequest(view, request);
+                return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                if (!isAllowedWebUrl(url)) { view.stopLoading(); showWebError("Blokir URL di luar Akulaku."); return; }
+                setWebLoading(true, "Memuat Akulaku...");
+                super.onPageStarted(view, url, favicon);
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (!isAllowedWebUrl(url)) return;
+                setWebLoading(false, "Toko aktif: " + activeMerchantTitle);
                 injectAkulakuDesktopFit(view);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request.isForMainFrame()) showWebError("Gagal memuat Akulaku. Periksa koneksi lalu tekan Reload.");
+                super.onReceivedError(view, request, error);
+            }
+
+            @Override
+            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                handler.cancel();
+                showWebError("Koneksi aman gagal. Reload setelah jaringan tepercaya tersedia.");
             }
         });
         webView.setWebChromeClient(new WebChromeClient());
@@ -520,6 +602,12 @@ public class MainActivity extends Activity {
 
         LinearLayout bar = bottomBar();
         root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
+        webStatusText = text("Menyiapkan Akulaku...", 12, MUTED, Typeface.NORMAL);
+        webStatusText.setPadding(0, 0, 0, dp(4));
+        bar.addView(webStatusText, new LinearLayout.LayoutParams(-1, -2));
+        webProgress = new ProgressBar(this);
+        webProgress.setVisibility(View.GONE);
+        bar.addView(webProgress, new LinearLayout.LayoutParams(-1, dp(3)));
         LinearLayout row1 = horizontalRow();
         Button back = secondaryButton("< Toko");
         Button home = primaryButton("Home");
@@ -546,10 +634,28 @@ public class MainActivity extends Activity {
 
         back.setOnClickListener(v -> showMerchantScreen());
         home.setOnClickListener(v -> webView.loadUrl(AKULAKU_VENDOR_URL));
-        reload.setOnClickListener(v -> webView.reload());
+        reload.setOnClickListener(v -> { if (webView != null) webView.reload(); });
         zoomOut.setOnClickListener(v -> setWebScale(webScale - 10));
         fit.setOnClickListener(v -> setWebScale(100));
         zoomIn.setOnClickListener(v -> setWebScale(webScale + 10));
+    }
+
+    private boolean isAllowedWebUrl(String rawUrl) {
+        if (rawUrl == null) return false;
+        try {
+            Uri uri = Uri.parse(rawUrl);
+            return "https".equalsIgnoreCase(uri.getScheme())
+                && "ec-vendor.akulaku.com".equalsIgnoreCase(uri.getHost());
+        } catch (Exception e) { return false; }
+    }
+
+    private void setWebLoading(boolean loading, String message) {
+        if (webProgress != null) webProgress.setVisibility(loading ? View.VISIBLE : View.GONE);
+        if (webStatusText != null) webStatusText.setText(message);
+    }
+
+    private void showWebError(String message) {
+        setWebLoading(false, message);
     }
 
     private void setWebScale(int scale) {
@@ -578,96 +684,120 @@ public class MainActivity extends Activity {
         if (username.isEmpty() || password.isEmpty()) { statusText.setText("Username dan password wajib diisi."); return; }
         progress.setVisibility(View.VISIBLE);
         statusText.setText("Login ke Tracsh...");
+        final int generation = requestGeneration.get();
         new Thread(() -> {
             Exception last = null;
             String csrf = "";
             try {
                 HttpURLConnection preflight = open(TRACSH_LOGIN_PAGE, "GET", null);
-                String loginHtml = readResponse(preflight);
-                saveCookies(preflight);
-                csrf = extractCsrf(loginHtml);
+                try {
+                    String loginHtml = readResponse(preflight);
+                    saveCookies(preflight);
+                    csrf = extractCsrf(loginHtml);
+                } finally { closeConnection(preflight); }
             } catch (Exception e) { last = e; }
 
-            String[] endpoints = {"/procAuth/adminSignIn", "/procAuth/signIn", "/auth/signIn"};
-            String[][] fieldSets = {{"username", "password"}, {"email", "password"}, {"username", "pass"}};
-            for (String endpoint : endpoints) {
-                for (String[] fields : fieldSets) {
-                    try {
-                        String body = encode(fields[0], username) + "&" + encode(fields[1], password);
-                        if (!csrf.isEmpty()) {
-                            body += "&" + encode("csrfToken", csrf);
-                            body += "&" + encode("csrf_token", csrf);
-                            body += "&" + encode("_token", csrf);
-                        }
-                        HttpURLConnection conn = open(TRACSH_BASE_URL + endpoint, "POST", "application/x-www-form-urlencoded");
-                        try (OutputStream os = conn.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
-                        int code = conn.getResponseCode();
-                        String text = readResponse(conn);
-                        saveCookies(conn);
-                        if (code >= 200 && code < 400 && !looksLikeLoginFailed(text, conn.getURL().toString())) {
-                            loggedInToTracsh = true;
-                            runOnUiThread(() -> showMerchantScreen());
-                            return;
-                        }
-                    } catch (Exception e) { last = e; }
-                }
-            }
+            if (!isRequestCurrent(generation)) return;
+            try {
+                String body = encode("username", username) + "&" + encode("password", password);
+                if (!csrf.isEmpty()) body += "&" + encode("csrfToken", csrf);
+                HttpURLConnection conn = open(TRACSH_BASE_URL + "/procAuth/signIn", "POST", "application/x-www-form-urlencoded");
+                try {
+                    try (OutputStream os = conn.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
+                    int code = conn.getResponseCode();
+                    String text = readResponse(conn);
+                    saveCookies(conn);
+                    String location = conn.getHeaderField("Location");
+                    boolean success = code >= 300 && code < 400 && location != null && !location.contains("/auth/signIn");
+                    if (!success) success = code >= 200 && code < 300 && !looksLikeLoginFailed(text, conn.getURL().toString());
+                    if (success) {
+                        loggedInToTracsh = true;
+                        if (isRequestCurrent(generation)) runOnUiThread(() -> { if (isRequestCurrent(generation)) showMerchantScreen(); });
+                        return;
+                    }
+                    last = new Exception("Login ditolak");
+                } finally { closeConnection(conn); }
+            } catch (Exception e) { last = e; }
             Exception finalLast = last;
-            runOnUiThread(() -> { progress.setVisibility(View.GONE); statusText.setText("Login gagal. Cek username/password Tracsh." + (finalLast != null ? " " + finalLast.getClass().getSimpleName() : "")); });
+            if (isRequestCurrent(generation)) runOnUiThread(() -> {
+                if (!isRequestCurrent(generation)) return;
+                if (progress != null) progress.setVisibility(View.GONE);
+                if (statusText != null) statusText.setText("Login gagal. Cek username/password Tracsh.");
+            });
         }).start();
     }
 
     private void fetchMerchants() {
         setControlsEnabled(false);
         showListLoading("Mengambil daftar toko dari Tracsh...");
+        final int generation = requestGeneration.get();
         new Thread(() -> {
+            HttpURLConnection conn = null;
             try {
-                HttpURLConnection conn = open(MERCHANT_ENDPOINT, "GET", null);
+                conn = open(MERCHANT_ENDPOINT, "GET", null);
                 int code = conn.getResponseCode();
                 String text = readResponse(conn);
                 saveCookies(conn);
                 if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
                 List<Merchant> parsed = parseMerchants(text);
+                if (!isRequestCurrent(generation)) return;
                 merchants.clear();
                 merchants.addAll(parsed);
-                runOnUiThread(() -> renderMerchantList(searchInput != null ? searchInput.getText().toString() : ""));
+                runOnUiThread(() -> { if (isRequestCurrent(generation)) renderMerchantList(searchInput != null ? searchInput.getText().toString() : ""); });
             } catch (Exception e) {
+                if (!isRequestCurrent(generation)) return;
                 runOnUiThread(() -> {
+                    if (!isRequestCurrent(generation)) return;
                     if (progress != null) progress.setVisibility(View.GONE);
                     setControlsEnabled(true);
-                    if (statusText != null) statusText.setText("Gagal ambil toko: " + e.getMessage());
+                    if (statusText != null) statusText.setText("Gagal memuat toko. Periksa koneksi lalu tekan Refresh.");
                     if (merchantListView != null) {
                         merchantListView.removeAllViews();
-                        TextView err = centerText("Gagal memuat toko. Tekan Refresh Toko.", 14, MUTED, Typeface.NORMAL);
+                        TextView err = centerText("Gagal memuat toko. Tekan Refresh untuk mencoba lagi.", 14, MUTED, Typeface.NORMAL);
                         err.setPadding(0, dp(24), 0, dp(24));
                         merchantListView.addView(err, new LinearLayout.LayoutParams(-1, -2));
                     }
                 });
-            }
+            } finally { closeConnection(conn); }
         }).start();
     }
 
     private void openMerchant(Merchant merchant, Button sourceButton) {
+        if (merchant == null) return;
+        new AlertDialog.Builder(this)
+            .setTitle("Konfirmasi toko")
+            .setMessage("Masuk ke " + (merchant.title.isEmpty() ? "toko ini" : merchant.title) + "? Sesi Akulaku saat ini akan dibersihkan.")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Masuk", (dialog, which) -> switchMerchant(merchant, sourceButton))
+            .show();
+    }
+
+    private void switchMerchant(Merchant merchant, Button sourceButton) {
         if (enteringStore) return;
         enteringStore = true;
         if (sourceButton != null) { sourceButton.setEnabled(false); sourceButton.setText("Masuk..."); }
         if (progress != null) progress.setVisibility(View.VISIBLE);
         if (statusText != null) statusText.setText("Menyiapkan login Akulaku untuk " + merchant.title + "...");
+        final int generation = requestGeneration.get();
         new Thread(() -> {
             try {
                 String cookie = merchant.cookie;
                 if (cookie == null || cookie.trim().isEmpty()) cookie = fetchMerchantCookie(merchant.merchantId);
                 if (cookie == null || cookie.trim().isEmpty()) throw new Exception("Cookie toko belum tersedia dari Tracsh.");
-                clearAkulakuCookiesOnly();
-                applyAkulakuCookie(cookie);
-                runOnUiThread(() -> {
+                if (!isRequestCurrent(generation)) return;
+                String finalCookie = cookie;
+                runOnUiThread(() -> prepareIsolatedCookies(finalCookie, () -> {
+                    if (!isRequestCurrent(generation)) return;
                     enteringStore = false;
+                    activeMerchantTitle = merchant.title;
                     if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
                     showAkulakuScreen();
-                    webView.loadUrl(AKULAKU_VENDOR_URL);
-                });
+                    if (webView != null) webView.loadUrl(AKULAKU_VENDOR_URL);
+                }));
             } catch (Exception e) {
+                if (!isRequestCurrent(generation)) return;
                 runOnUiThread(() -> {
+                    if (!isRequestCurrent(generation)) return;
                     enteringStore = false;
                     if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
                     if (progress != null) progress.setVisibility(View.GONE);
@@ -682,24 +812,37 @@ public class MainActivity extends Activity {
         JSONObject body = new JSONObject();
         body.put("merchantId", merchantId);
         HttpURLConnection conn = open(MERCHANT_COOKIE_ENDPOINT, "POST", "application/json");
-        try (OutputStream os = conn.getOutputStream()) { os.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
-        int code = conn.getResponseCode();
-        saveCookies(conn);
-        if (code < 200 || code >= 300) return "";
-        JSONObject data = new JSONObject(readResponse(conn));
-        return data.optString("cookie", data.optString("data", ""));
+        try {
+            try (OutputStream os = conn.getOutputStream()) { os.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
+            int code = conn.getResponseCode();
+            saveCookies(conn);
+            if (code < 200 || code >= 300) return "";
+            JSONObject data = new JSONObject(readResponse(conn));
+            return data.optString("cookie", data.optString("data", ""));
+        } finally { closeConnection(conn); }
     }
 
     private HttpURLConnection open(String url, String method, String contentType) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod(method);
         conn.setInstanceFollowRedirects(false);
+        conn.setConnectTimeout(NETWORK_TIMEOUT_MS);
+        conn.setReadTimeout(NETWORK_TIMEOUT_MS);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.5");
-        String tracshCookie = CookieManager.getInstance().getCookie(TRACSH_BASE_URL);
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/0.3.6");
+        String tracshCookie = tracshCookieHeader();
         if (tracshCookie != null && !tracshCookie.trim().isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }
+        activeConnections.add(conn);
         return conn;
+    }
+
+    private void closeConnection(HttpURLConnection conn) {
+        if (conn != null) { activeConnections.remove(conn); conn.disconnect(); }
+    }
+
+    private boolean isRequestCurrent(int generation) {
+        return !destroyed && generation == requestGeneration.get();
     }
 
     private void saveCookies(HttpURLConnection conn) {
@@ -708,11 +851,46 @@ public class MainActivity extends Activity {
         List<String> values = headers.get("Set-Cookie");
         if (values == null) values = headers.get("set-cookie");
         if (values == null) return;
-        CookieManager cm = CookieManager.getInstance();
         for (String value : values) {
-            if (value != null && !value.trim().isEmpty()) cm.setCookie(TRACSH_BASE_URL, value);
+            if (value != null && !value.trim().isEmpty()) {
+                String[] pair = value.trim().split("=", 2);
+                if (pair.length == 2 && COOKIE_NAME.matcher(pair[0].trim()).matches()
+                    && !COOKIE_ATTRIBUTES.contains(pair[0].trim().toLowerCase(Locale.US))) {
+                    String cookieValue = pair[1].split(";", 2)[0].trim();
+                    if (!cookieValue.isEmpty()) tracshCookies.put(pair[0].trim(), pair[0].trim() + "=" + cookieValue);
+                }
+                String cookie = value;
+                String domain = cookieAttribute(cookie, "domain");
+                String url = domain != null && domain.toLowerCase(Locale.US).contains("tracsh.com")
+                    ? "https://" + domain.replaceFirst("^\\.", "") : TRACSH_BASE_URL;
+                setCookieSync(url, cookie);
+            }
         }
-        cm.flush();
+    }
+
+    private String cookieAttribute(String header, String name) {
+        if (header == null) return null;
+        for (String part : header.split(";")) {
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length == 2 && name.equalsIgnoreCase(pair[0].trim())) return pair[1].trim();
+        }
+        return null;
+    }
+
+    private String tracshCookieHeader() {
+        synchronized (tracshCookies) {
+            return TextUtils.join("; ", tracshCookies.values());
+        }
+    }
+
+    private void setCookieSync(String url, String header) {
+        if (header == null || header.trim().isEmpty()) return;
+        Runnable set = () -> {
+            CookieManager.getInstance().setCookie(url, header, null);
+            CookieManager.getInstance().flush();
+        };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) set.run();
+        else runOnUiThread(set);
     }
 
     private String extractCsrf(String html) {
@@ -781,22 +959,64 @@ public class MainActivity extends Activity {
         return obj.has("merchantId") || obj.has("merchant_id") || obj.has("mid") || obj.has("title") || obj.has("storeName") || obj.has("accountUsername");
     }
 
-    private void clearAkulakuCookiesOnly() {
-        CookieManager cm = CookieManager.getInstance();
-        cm.setCookie(AKULAKU_COOKIE_URL, "a=; Domain=.akulaku.com; Path=/; Max-Age=0");
-        cm.setCookie(AKULAKU_COOKIE_URL, "a=; Domain=ec-vendor.akulaku.com; Path=/; Max-Age=0");
-        cm.flush();
+    private void setCookieHeaders(String url, List<String> headers, int index, Runnable completion) {
+        if (index >= headers.size()) { CookieManager.getInstance().flush(); if (completion != null) completion.run(); return; }
+        CookieManager.getInstance().setCookie(url, headers.get(index), ok -> setCookieHeaders(url, headers, index + 1, completion));
     }
 
-    private void applyAkulakuCookie(String cookieHeader) {
-        CookieManager cm = CookieManager.getInstance();
+    private void prepareIsolatedCookies(String cookieHeader, Runnable completion) {
+        clearAllCookies(() -> applyAkulakuCookie(cookieHeader, completion));
+    }
+
+    private void applyAkulakuCookie(String cookieHeader, Runnable completion) {
+        List<String> safeCookies = new ArrayList<>();
         for (String part : cookieHeader.split(";")) {
-            String cookie = part.trim();
-            if (cookie.isEmpty() || !cookie.contains("=")) continue;
-            cm.setCookie(AKULAKU_COOKIE_URL, cookie + "; Domain=.akulaku.com; Path=/; Secure");
-            cm.setCookie(AKULAKU_COOKIE_URL, cookie + "; Domain=ec-vendor.akulaku.com; Path=/; Secure");
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length != 2 || !COOKIE_NAME.matcher(pair[0].trim()).matches() || COOKIE_ATTRIBUTES.contains(pair[0].trim().toLowerCase(Locale.US))) continue;
+            String value = pair[1].trim();
+            if (value.isEmpty()) continue;
+            safeCookies.add(pair[0].trim() + '=' + value + "; Path=/; Secure");
         }
-        cm.flush();
+        setCookieHeaders(AKULAKU_COOKIE_URL, safeCookies, 0, completion);
+    }
+
+    private void clearAllCookies(Runnable completion) {
+        Runnable clear = () -> CookieManager.getInstance().removeAllCookies(ignored -> {
+            CookieManager.getInstance().flush();
+            if (completion != null) completion.run();
+        });
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) clear.run();
+        else runOnUiThread(clear);
+    }
+
+    private void logoutSession() {
+        requestGeneration.incrementAndGet();
+        for (HttpURLConnection conn : new ArrayList<>(activeConnections)) closeConnection(conn);
+        clearAllCookies(() -> {
+            loggedInToTracsh = false;
+            tracshCookies.clear();
+            showLoginScreen();
+        });
+    }
+
+    private void destroyWebView() {
+        if (webView == null) return;
+        webView.stopLoading();
+        webView.setWebViewClient(null);
+        webView.setWebChromeClient(null);
+        webView.destroy();
+        webView = null;
+        webStatusText = null;
+        webProgress = null;
+    }
+
+    @Override
+    protected void onDestroy() {
+        destroyed = true;
+        requestGeneration.incrementAndGet();
+        for (HttpURLConnection conn : new ArrayList<>(activeConnections)) closeConnection(conn);
+        destroyWebView();
+        super.onDestroy();
     }
 
     private boolean looksLikeLoginFailed(String text, String url) {
@@ -822,8 +1042,20 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if ("akulaku".equals(currentScreen) && webView != null && webView.canGoBack()) { webView.goBack(); return; }
-        if ("akulaku".equals(currentScreen)) { showMerchantScreen(); return; }
-        if ("merchant".equals(currentScreen)) { showLoginScreen(); return; }
+        if ("akulaku".equals(currentScreen)) { destroyWebView(); showMerchantScreen(); return; }
+        if ("merchant".equals(currentScreen)) {
+            if (loggedInToTracsh) {
+                new AlertDialog.Builder(this)
+                    .setTitle("Keluar dari Tracsh?")
+                    .setMessage("Keluar akan menghapus sesi Tracsh dan Akulaku dari perangkat ini.")
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Keluar", (dialog, which) -> logoutSession())
+                    .show();
+                return;
+            }
+            showLoginScreen();
+            return;
+        }
         super.onBackPressed();
     }
 

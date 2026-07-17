@@ -5,3 +5,11 @@ local.properties
 *.iml
 .idea/
 .DS_Store
+
+# Signing material and generated packages must stay outside Git.
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+*.apk
+*.aab

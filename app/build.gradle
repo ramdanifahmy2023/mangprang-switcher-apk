@@ -1,5 +1,16 @@
 plugins { id 'com.android.application' }
 
+def releaseStoreFile = System.getenv('ANDROID_SIGNING_STORE_FILE')
+def releaseStorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+def releaseKeyAlias = System.getenv('ANDROID_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+def releaseSigningConfigured = [
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+].every { it != null && !it.trim().isEmpty() }
+
 android {
     namespace 'id.fahmy.mangprang'
     compileSdk 35
@@ -8,7 +19,39 @@ android {
         applicationId 'id.fahmy.mangprang'
         minSdk 23
         targetSdk 35
-        versionCode 12
-        versionName '0.3.5'
+        versionCode 13
+        versionName '0.3.6'
+    }
+
+    signingConfigs {
+        release {
+            if (releaseSigningConfigured) {
+                storeFile file(releaseStoreFile)
+                storeType 'PKCS12'
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releasePackagingRequested = graph.allTasks.any {
+        it.name == 'packageRelease' || it.name == 'assembleRelease' || it.name == 'bundleRelease'
+    }
+    if (releasePackagingRequested && !releaseSigningConfigured) {
+        throw new GradleException(
+            'Release signing requires ANDROID_SIGNING_STORE_FILE, ANDROID_KEYSTORE_PASSWORD, ' +
+            'ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD.'
+        )
     }
 }

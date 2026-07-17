@@ -1,4 +1,4 @@
-name: Android APK Build
+name: Android release
 
 on:
   push:
@@ -6,14 +6,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  lint-test-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -29,22 +36,56 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Decode release keystore
+        env:
+          ANDROID_SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}
+        run: |
+          set -eu
+          test -n "$ANDROID_SIGNING_KEY_BASE64"
+          umask 077
+          printf '%s' "$ANDROID_SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/mangprang-release.keystore"
+          test -s "$RUNNER_TEMP/mangprang-release.keystore"
+          echo "ANDROID_SIGNING_STORE_FILE=$RUNNER_TEMP/mangprang-release.keystore" >> "$GITHUB_ENV"
 
-      - name: Upload APK artifact
+      - name: Lint, test, and build signed release
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle lintRelease testReleaseUnitTest assembleRelease --no-daemon --stacktrace
+
+      - name: Verify signing certificate and create checksum
+        run: |
+          set -eu
+          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print | head -n 1)"
+          test -n "$apk_path"
+          test "$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print | wc -l | tr -d ' ')" = "1"
+
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -x "$apksigner_path"
+          "$apksigner_path" verify --verbose --print-certs "$apk_path" > "$RUNNER_TEMP/apksigner.txt"
+          ! grep -Eqi 'Android Debug' "$RUNNER_TEMP/apksigner.txt"
+
+          certificate_sha256="$(grep 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner.txt" | head -n 1 | cut -d: -f2- | tr -d ' ')"
+          test -n "$certificate_sha256"
+
+          mkdir -p dist
+          cp "$apk_path" dist/mangprang-switcher-v0.3.6.apk
+          (cd dist && sha256sum mangprang-switcher-v0.3.6.apk > SHA256SUMS)
+          {
+            echo '### Android release verification'
+            echo
+            echo "Certificate SHA-256: \`$certificate_sha256\`"
+            echo
+            echo '```text'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload signed release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mangprang-switcher-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-
-      - name: Commit debug APK into repo
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p releases/latest
-          cp app/build/outputs/apk/debug/*.apk releases/latest/mangprang-switcher-debug.apk
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add releases/latest/mangprang-switcher-debug.apk
-          git commit -m "Update debug APK artifact [skip ci]" || exit 0
-          git push
+          name: mangprang-switcher-v0.3.6-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3

@@ -36,12 +36,18 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Check security contract
+        run: python3 tools/check_security_contract.py
+
       - name: Decode release keystore
         env:
           ANDROID_SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}
         run: |
           set -eu
-          test -n "$ANDROID_SIGNING_KEY_BASE64"
+          if [ -z "$ANDROID_SIGNING_KEY_BASE64" ]; then
+            echo '::error::Release signing is not configured. Add ANDROID_SIGNING_KEY_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD as repository Actions secrets.'
+            exit 1
+          fi
           umask 077
           printf '%s' "$ANDROID_SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/mangprang-release.keystore"
           test -s "$RUNNER_TEMP/mangprang-release.keystore"

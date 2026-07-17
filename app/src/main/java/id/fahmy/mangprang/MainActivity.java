@@ -712,7 +712,11 @@ public class MainActivity extends Activity {
                     if (!success) success = code >= 200 && code < 300 && !looksLikeLoginFailed(text, conn.getURL().toString());
                     if (success) {
                         loggedInToTracsh = true;
-                        if (isRequestCurrent(generation)) runOnUiThread(() -> { if (isRequestCurrent(generation)) showMerchantScreen(); });
+                        if (isRequestCurrent(generation)) runOnUiThread(() -> {
+                            if (!isRequestCurrent(generation)) return;
+                            if (passwordInput != null) passwordInput.setText("");
+                            showMerchantScreen();
+                        });
                         return;
                     }
                     last = new Exception("Login ditolak");
@@ -781,8 +785,7 @@ public class MainActivity extends Activity {
         final int generation = requestGeneration.get();
         new Thread(() -> {
             try {
-                String cookie = merchant.cookie;
-                if (cookie == null || cookie.trim().isEmpty()) cookie = fetchMerchantCookie(merchant.merchantId);
+                String cookie = fetchMerchantCookie(merchant);
                 if (cookie == null || cookie.trim().isEmpty()) throw new Exception("Cookie toko belum tersedia dari Tracsh.");
                 if (!isRequestCurrent(generation)) return;
                 String finalCookie = cookie;
@@ -801,16 +804,21 @@ public class MainActivity extends Activity {
                     enteringStore = false;
                     if (sourceButton != null) { sourceButton.setEnabled(true); sourceButton.setText("Masuk"); }
                     if (progress != null) progress.setVisibility(View.GONE);
-                    if (statusText != null) statusText.setText("Belum bisa masuk toko: " + e.getMessage());
+                    if (statusText != null) statusText.setText("Belum bisa masuk toko. Cek koneksi atau status cookie, lalu coba lagi.");
                 });
             }
         }).start();
     }
 
-    private String fetchMerchantCookie(String merchantId) throws Exception {
-        if (merchantId == null || merchantId.isEmpty()) return "";
+    private String fetchMerchantCookie(Merchant merchant) throws Exception {
+        if (merchant == null) return "";
         JSONObject body = new JSONObject();
-        body.put("merchantId", merchantId);
+        if (!merchant.merchantId.isEmpty()) body.put("merchantId", merchant.merchantId);
+        if (!merchant.id.isEmpty()) {
+            body.put("id", merchant.id);
+            body.put("tracsh_row_id", merchant.id);
+        }
+        if (body.length() == 0) return "";
         HttpURLConnection conn = open(MERCHANT_COOKIE_ENDPOINT, "POST", "application/json");
         try {
             try (OutputStream os = conn.getOutputStream()) { os.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
@@ -1075,7 +1083,8 @@ public class MainActivity extends Activity {
             m.email = pick(o, "email", "accountUsername", "username");
             m.groupTitle = pick(o, "groupTitle", "group", "groupName", "leader");
             m.employeeName = pick(o, "employeName", "employeeName", "marketerName");
-            m.cookie = pick(o, "cookie", "cookieHeader", "akulakuCookie");
+            // Cookie must come only from the session-scoped endpoint, never the store list.
+            m.cookie = "";
             return m;
         }
         boolean hasCookie() { return cookie != null && !cookie.trim().isEmpty(); }

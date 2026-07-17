@@ -4,11 +4,11 @@ Android APK helper internal PT FahmyID untuk login Tracsh, menampilkan daftar to
 
 ## Status
 
-Versi v0.3.6 (`versionCode 13`) native Android WebView dengan dynamic safe-area API 30+, display cutout handling, WebView viewport, dan bottom toolbar fix. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa switch toko Akulaku dari HP Android lewat akun Tracsh.
+Versi v0.3.6 (`versionCode 13`) native Android WebView dengan dynamic safe-area API 30+, display cutout handling, WebView viewport, dan bottom toolbar fix. Cookie toko tidak diambil dari list; aplikasi selalu meminta cookie melalui endpoint session-scoped dengan identitas row toko. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa switch toko Akulaku dari HP Android lewat akun Tracsh.
 
 ## Cara Build
 
-GitHub Actions menjalankan `lintRelease`, unit test release, build APK release bertanda tangan, verifikasi sertifikat bukan Android Debug, dan pembuatan checksum SHA-256 pada setiap push ke `main` atau pemanggilan manual. APK dan `SHA256SUMS` tersedia sebagai artifact privat sesuai akses repository selama 3 hari. Workflow tidak melakukan commit atau push APK ke repository.
+GitHub Actions menjalankan security contract check, `lintRelease`, unit test release, build APK release bertanda tangan, verifikasi sertifikat bukan Android Debug, dan pembuatan checksum SHA-256 pada setiap push ke `main` atau pemanggilan manual. APK dan `SHA256SUMS` tersedia sebagai artifact privat sesuai akses repository selama 3 hari. Workflow tidak melakukan commit atau push APK ke repository.
 
 Manual lokal bila Android SDK tersedia:
 

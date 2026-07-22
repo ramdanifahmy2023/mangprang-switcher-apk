@@ -6,6 +6,8 @@ Android APK helper internal PT FahmyID untuk login Tracsh, menampilkan daftar to
 
 Versi v0.3.7 (`versionCode 14`) memverifikasi sesi melalui endpoint daftar toko sebelum membuka layar merchant, membedakan sesi tidak valid, respons rusak, gangguan jaringan, dan akun valid tanpa assignment toko. Login mendukung pilihan akun Admin/Marketer atau Group. Cookie sesi Tracsh disimpan hanya pada jar HTTP in-memory yang terpisah dari CookieManager Akulaku. Cookie toko tidak diambil dari list; aplikasi selalu meminta cookie melalui endpoint session-scoped dengan identitas row toko.
 
+Source v0.3.7 sudah lolos lint, unit-test task, dan build debug di CI. APK debug hanya boleh dipakai sebagai pilot internal; release distributable tetap harus dibangun dengan signing key release melalui workflow utama dan diverifikasi bersama checksum-nya.
+
 ## Cara Build
 
 GitHub Actions menjalankan security contract check, `lintRelease`, unit test release, build APK release bertanda tangan, verifikasi sertifikat bukan Android Debug, dan pembuatan checksum SHA-256 pada setiap push ke `main` atau pemanggilan manual. APK dan `SHA256SUMS` tersedia sebagai artifact privat sesuai akses repository selama 3 hari. Workflow tidak melakukan commit atau push APK ke repository.
@@ -61,7 +63,7 @@ Salin output langsung ke secret `ANDROID_SIGNING_KEY_BASE64`; jangan kirim outpu
 
 ## Cara Pakai
 
-1. Install APK release bertanda tangan dari GitHub Actions artifact.
+1. Install APK release bertanda tangan dari GitHub Actions artifact. APK debug hanya untuk pilot internal terkontrol.
 2. Buka aplikasi.
 3. Pilih jenis akun **Admin / Marketer** atau **Group**, lalu login memakai username/password Tracsh.
 4. Pilih toko dari daftar toko milik user.
@@ -74,4 +76,5 @@ Salin output langsung ke secret `ANDROID_SIGNING_KEY_BASE64`; jangan kirim outpu
 - Password Tracsh tidak disimpan.
 - Cookie toko hanya dipakai untuk inject WebView Akulaku.
 - Jangan share APK ke luar tim internal.
-- Endpoint aktif: `https://tracsh.com/api/updateCookie`.
+- Endpoint daftar toko: `GET https://tracsh.com/apiv/merchant`.
+- Endpoint cookie session-scoped: `POST https://tracsh.com/api/getMerchantCookie`.

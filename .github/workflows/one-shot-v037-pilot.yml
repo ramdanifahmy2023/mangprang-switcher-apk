@@ -1,0 +1,87 @@
+name: One-shot encrypted v0.3.7 pilot APK
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-v037-pilot
+  cancel-in-progress: true
+
+jobs:
+  build-encrypted-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Check source contracts
+        run: |
+          python3 tools/check_security_contract.py
+          python3 tools/check_login_contract.py
+
+      - name: Lint, test, and build pilot APK
+        run: gradle lintDebug testDebugUnitTest assembleDebug --no-daemon --stacktrace
+
+      - name: Verify and encrypt artifact
+        run: |
+          set -eu
+          apk_path="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | head -n 1)"
+          test -n "$apk_path"
+          test "$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | wc -l | tr -d ' ')" = "1"
+
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -x "$apksigner_path"
+          "$apksigner_path" verify --verbose --print-certs "$apk_path" > "$RUNNER_TEMP/apksigner.txt"
+
+          mkdir -p "$RUNNER_TEMP/payload"
+          cp "$apk_path" "$RUNNER_TEMP/payload/mangprang-switcher-v0.3.7-pilot.apk"
+          (cd "$RUNNER_TEMP/payload" && sha256sum mangprang-switcher-v0.3.7-pilot.apk > SHA256SUMS)
+          {
+            echo 'version=0.3.7'
+            echo 'versionCode=14'
+            echo "commit=${GITHUB_SHA}"
+            echo 'channel=internal-pilot-debug-signed'
+          } > "$RUNNER_TEMP/payload/build-info.txt"
+          (cd "$RUNNER_TEMP/payload" && zip -9 "$RUNNER_TEMP/mangprang-v037-pilot.zip" ./*)
+
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in "$RUNNER_TEMP/mangprang-v037-pilot.zip" \
+            -outform DER \
+            -out "$RUNNER_TEMP/mangprang-v037-pilot.p7m" \
+            tools/one-shot-v037-recipient-cert.pem
+          sha256sum "$RUNNER_TEMP/mangprang-v037-pilot.p7m" > "$RUNNER_TEMP/ENCRYPTED_SHA256SUMS"
+
+      - name: Publish encrypted transport branch
+        run: |
+          set -eu
+          git config user.name 'Safira Fathia Build Bot'
+          git config user.email 'safira@fahmyid.local'
+          git checkout --orphan safira-build-v037-encrypted
+          git rm -rf .
+          git clean -fdx
+          mkdir -p encrypted-artifact
+          cp "$RUNNER_TEMP/mangprang-v037-pilot.p7m" encrypted-artifact/
+          cp "$RUNNER_TEMP/ENCRYPTED_SHA256SUMS" encrypted-artifact/
+          printf '%s\n' "$GITHUB_SHA" > encrypted-artifact/source-commit.txt
+          git add encrypted-artifact
+          git commit -m 'Encrypted one-shot v0.3.7 pilot artifact [skip ci]'
+          git push --force origin HEAD:refs/heads/safira-build-v037-encrypted

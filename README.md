@@ -4,7 +4,7 @@ Android APK helper internal PT FahmyID untuk login Tracsh, menampilkan daftar to
 
 ## Status
 
-Versi v0.3.6 (`versionCode 13`) native Android WebView dengan dynamic safe-area API 30+, display cutout handling, WebView viewport, dan bottom toolbar fix. Cookie toko tidak diambil dari list; aplikasi selalu meminta cookie melalui endpoint session-scoped dengan identitas row toko. Ini bukan Chrome Extension; ini APK terpisah supaya tim bisa switch toko Akulaku dari HP Android lewat akun Tracsh.
+Versi v0.3.7 (`versionCode 14`) memverifikasi sesi melalui endpoint daftar toko sebelum membuka layar merchant, membedakan sesi tidak valid, respons rusak, gangguan jaringan, dan akun valid tanpa assignment toko. Login mendukung pilihan akun Admin/Marketer atau Group. Cookie sesi Tracsh disimpan hanya pada jar HTTP in-memory yang terpisah dari CookieManager Akulaku. Cookie toko tidak diambil dari list; aplikasi selalu meminta cookie melalui endpoint session-scoped dengan identitas row toko.
 
 ## Cara Build
 
@@ -63,7 +63,7 @@ Salin output langsung ke secret `ANDROID_SIGNING_KEY_BASE64`; jangan kirim outpu
 
 1. Install APK release bertanda tangan dari GitHub Actions artifact.
 2. Buka aplikasi.
-3. Login memakai username/password Tracsh.
+3. Pilih jenis akun **Admin / Marketer** atau **Group**, lalu login memakai username/password Tracsh.
 4. Pilih toko dari daftar toko milik user.
 5. Klik **Masuk Toko**.
 6. App inject cookie toko ke WebView dan membuka Akulaku Seller.

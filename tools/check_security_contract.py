@@ -25,6 +25,11 @@ checks = {
     "WebView debugging disabled": "setWebContentsDebuggingEnabled(false)" in activity,
     "response ownership checked": "responseMerchantId.equals(merchant.merchantId)" in activity,
     "cookie writes fail closed": "if (!ok)" in activity,
+    "Tracsh session stays outside WebView CookieManager": "setCookieSync(" not in activity,
+    "login verifies merchant endpoint": "MerchantFetchResult verification = requestMerchants()" in activity,
+    "group login is explicit": 'TRACSH_GROUP_LOGIN_ENDPOINT = TRACSH_BASE_URL + "/procAuth/signInGroup"' in activity,
+    "unauthorized session is distinguished": '"unauthorized".equals(result.state)' in activity,
+    "valid empty account has a clear message": "akun ini belum memiliki toko" in activity.lower(),
 }
 
 for name, ok in checks.items():

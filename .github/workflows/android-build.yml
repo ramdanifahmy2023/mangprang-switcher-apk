@@ -37,7 +37,9 @@ jobs:
           gradle-version: '8.10.2'
 
       - name: Check security contract
-        run: python3 tools/check_security_contract.py
+        run: |
+          python3 tools/check_security_contract.py
+          python3 tools/check_login_contract.py
 
       - name: Decode release keystore
         env:
@@ -76,8 +78,8 @@ jobs:
           test -n "$certificate_sha256"
 
           mkdir -p dist
-          cp "$apk_path" dist/mangprang-switcher-v0.3.6.apk
-          (cd dist && sha256sum mangprang-switcher-v0.3.6.apk > SHA256SUMS)
+          cp "$apk_path" dist/mangprang-switcher-v0.3.7.apk
+          (cd dist && sha256sum mangprang-switcher-v0.3.7.apk > SHA256SUMS)
           {
             echo '### Android release verification'
             echo
@@ -91,7 +93,7 @@ jobs:
       - name: Upload signed release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mangprang-switcher-v0.3.6-signed
+          name: mangprang-switcher-v0.3.7-signed
           path: dist/
           if-no-files-found: error
           retention-days: 3

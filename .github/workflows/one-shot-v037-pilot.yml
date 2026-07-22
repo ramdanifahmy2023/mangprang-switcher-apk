@@ -39,30 +39,42 @@ jobs:
           python3 tools/check_login_contract.py
 
       - name: Lint, test, and build pilot APK
-        run: gradle lintDebug testDebugUnitTest assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          gradle lintDebug testDebugUnitTest assembleDebug --no-daemon --stacktrace > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/build.log"
+          printf '%s\n' "$status" > "$RUNNER_TEMP/build-exit-code"
 
-      - name: Verify and encrypt artifact
+      - name: Verify and encrypt artifact or diagnostics
         run: |
           set -eu
-          apk_path="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | head -n 1)"
-          test -n "$apk_path"
-          test "$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | wc -l | tr -d ' ')" = "1"
-
-          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
-          test -x "$apksigner_path"
-          "$apksigner_path" verify --verbose --print-certs "$apk_path" > "$RUNNER_TEMP/apksigner.txt"
-
+          build_status="$(cat "$RUNNER_TEMP/build-exit-code")"
           mkdir -p "$RUNNER_TEMP/payload"
-          cp "$apk_path" "$RUNNER_TEMP/payload/mangprang-switcher-v0.3.7-pilot.apk"
-          (cd "$RUNNER_TEMP/payload" && sha256sum mangprang-switcher-v0.3.7-pilot.apk > SHA256SUMS)
           {
             echo 'version=0.3.7'
             echo 'versionCode=14'
             echo "commit=${GITHUB_SHA}"
-            echo 'channel=internal-pilot-debug-signed'
+            echo "buildStatus=${build_status}"
           } > "$RUNNER_TEMP/payload/build-info.txt"
-          (cd "$RUNNER_TEMP/payload" && zip -9 "$RUNNER_TEMP/mangprang-v037-pilot.zip" ./*)
 
+          if [ "$build_status" = "0" ]; then
+            apk_path="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | head -n 1)"
+            test -n "$apk_path"
+            test "$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | wc -l | tr -d ' ')" = "1"
+            apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+            test -x "$apksigner_path"
+            "$apksigner_path" verify --verbose --print-certs "$apk_path" > "$RUNNER_TEMP/apksigner.txt"
+            cp "$apk_path" "$RUNNER_TEMP/payload/mangprang-switcher-v0.3.7-pilot.apk"
+            (cd "$RUNNER_TEMP/payload" && sha256sum mangprang-switcher-v0.3.7-pilot.apk > SHA256SUMS)
+            echo 'channel=internal-pilot-debug-signed' >> "$RUNNER_TEMP/payload/build-info.txt"
+          else
+            cp "$RUNNER_TEMP/build.log" "$RUNNER_TEMP/payload/build.log"
+            echo 'channel=encrypted-build-diagnostics' >> "$RUNNER_TEMP/payload/build-info.txt"
+          fi
+
+          (cd "$RUNNER_TEMP/payload" && zip -9 "$RUNNER_TEMP/mangprang-v037-pilot.zip" ./*)
           openssl cms -encrypt -binary -aes-256-cbc \
             -in "$RUNNER_TEMP/mangprang-v037-pilot.zip" \
             -outform DER \
@@ -85,3 +97,6 @@ jobs:
           git add encrypted-artifact
           git commit -m 'Encrypted one-shot v0.3.7 pilot artifact [skip ci]'
           git push --force origin HEAD:refs/heads/safira-build-v037-encrypted
+
+      - name: Enforce successful build
+        run: test "$(cat "$RUNNER_TEMP/build-exit-code")" = "0"

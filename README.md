@@ -4,9 +4,9 @@ Android APK helper internal PT FahmyID untuk login Tracsh, menampilkan daftar to
 
 ## Status
 
-Versi v0.3.7 (`versionCode 14`) memverifikasi sesi melalui endpoint daftar toko sebelum membuka layar merchant, membedakan sesi tidak valid, respons rusak, gangguan jaringan, dan akun valid tanpa assignment toko. Login mendukung pilihan akun Admin/Marketer atau Group. Cookie sesi Tracsh disimpan hanya pada jar HTTP in-memory yang terpisah dari CookieManager Akulaku. Cookie toko tidak diambil dari list; aplikasi selalu meminta cookie melalui endpoint session-scoped dengan identitas row toko.
+Versi v0.3.8 (`versionCode 15`) memperbaiki loading login v0.3.7 ketika akun menerima payload daftar toko besar. Request merchant sekarang meminta gzip, deduplikasi toko menjadi linear, ukuran respons dibatasi, status UI membedakan tahap login dan pengambilan toko, serta watchdog total 60 detik mengembalikan kontrol bila request macet. Verifikasi sesi tetap memakai endpoint daftar toko dan membedakan sesi tidak valid, respons rusak, gangguan jaringan, timeout, serta akun valid tanpa assignment toko.
 
-Source v0.3.7 sudah lolos lint, unit-test task, dan build debug di CI. APK debug hanya boleh dipakai sebagai pilot internal; release distributable tetap harus dibangun dengan signing key release melalui workflow utama dan diverifikasi bersama checksum-nya.
+Source v0.3.8 harus lolos lint, unit-test task, dan build di CI sebelum pilot. APK debug hanya boleh dipakai sebagai pilot internal; release distributable tetap harus dibangun dengan signing key release melalui workflow utama dan diverifikasi bersama checksum-nya.
 
 ## Cara Build
 

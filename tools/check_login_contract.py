@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free source contract for the v0.3.7 login hotfix."""
+"""Dependency-free source contract for the v0.3.8 login runtime hotfix."""
 
 from pathlib import Path
 import re
@@ -7,11 +7,13 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 activity = (ROOT / "app/src/main/java/id/fahmy/mangprang/MainActivity.java").read_text()
+runtime = (ROOT / "app/src/main/java/id/fahmy/mangprang/LoginRuntime.java").read_text()
+cookie_jar = (ROOT / "app/src/main/java/id/fahmy/mangprang/TracshCookieJar.java").read_text()
 build = (ROOT / "app/build.gradle").read_text()
 
 checks = {
-    "versionCode advanced": "versionCode 14" in build,
-    "versionName advanced": "versionName '0.3.7'" in build,
+    "versionCode advanced": "versionCode 15" in build,
+    "versionName advanced": "versionName '0.3.8'" in build,
     "app version comes from Gradle": "BuildConfig.VERSION_NAME" in activity and "APP_VERSION" not in activity,
     "account login endpoint": 'TRACSH_ACCOUNT_LOGIN_ENDPOINT = TRACSH_BASE_URL + "/procAuth/signIn"' in activity,
     "group login endpoint": 'TRACSH_GROUP_LOGIN_ENDPOINT = TRACSH_BASE_URL + "/procAuth/signInGroup"' in activity,
@@ -26,10 +28,21 @@ checks = {
     "network failure is distinct": 'MerchantFetchResult.networkError()' in activity,
     "empty account is not treated as login failure": "MerchantFetchResult.success(parseMerchants(text))" in activity and "AUTH_EMPTY" in activity,
     "password is cleared after verified login": 'passwordInput.setText("")' in activity,
-    "Tracsh session is in-memory": "tracshCookies" in activity and "setCookieSync(" not in activity,
+    "Tracsh session is in-memory": "TracshCookieJar" in activity and "setCookieSync(" not in activity,
     "empty JSON object is invalid": "merchantArrayFromWrapper" in activity and 'if (rows == null) throw new Exception' in activity,
     "Tracsh cookies are host restricted": '"tracsh.com".equalsIgnoreCase(target.getHost())' in activity,
-    "expired cookies are removed": 'tracshCookies.remove(name)' in activity,
+    "Tracsh cookies preserve URI scope": "CookieManager" in cookie_jar and "CookiePolicy.ACCEPT_ORIGINAL_SERVER" in cookie_jar and "target.toURI()" in cookie_jar,
+    "merchant response requests gzip": 'setRequestProperty("Accept-Encoding", "gzip")' in activity and "GZIPInputStream" in runtime,
+    "login has total watchdog": "LOGIN_TOTAL_TIMEOUT_MS = 60_000" in activity and "scheduleLoginTimeout(generation)" in activity and "VERIFY_TIMEOUT" in activity,
+    "large response is byte bounded": "MAX_RESPONSE_BYTES" in activity and "total > maxBytes" in runtime and "Response terlalu besar" in runtime,
+    "merchant dedupe is linear": "LinkedHashMap<String, Merchant> unique" in activity and "unique.containsKey(key)" in activity,
+    "login progress distinguishes merchant fetch": "Login diterima. Mengambil daftar toko..." in activity,
+    "active connections cancel from snapshot": "synchronized (activeConnections)" in activity and "cancelActiveConnections()" in activity,
+    "POST body has fixed length": "setFixedLengthStreamingMode(bodyBytes.length)" in activity,
+    "login POST skips response body": re.search(r"conn\.getResponseCode\(\);\s+saveCookies\(conn\);", activity) is not None,
+    "merchant headers precede body": re.search(r"int code = conn\.getResponseCode\(\);\s+saveCookies\(conn\);[\s\S]+?String text = readResponse\(conn\);", activity) is not None,
+    "transport exceptions are not masked": "catch (Exception e) { is = conn.getErrorStream(); }" not in activity,
+    "lifecycle guards async callbacks": "!isFinishing() && !isDestroyed()" in activity,
 }
 
 for name, ok in checks.items():

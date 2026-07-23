@@ -42,10 +42,8 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -56,7 +54,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -74,6 +71,8 @@ public class MainActivity extends Activity {
     private static final String AKULAKU_COOKIE_URL = "https://ec-vendor.akulaku.com";
     private static final String AKULAKU_VENDOR_URL = "https://ec-vendor.akulaku.com/ec-vendor/";
     private static final int NETWORK_TIMEOUT_MS = 15_000;
+    private static final int LOGIN_TOTAL_TIMEOUT_MS = 60_000;
+    private static final int MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
     private static final int WEBVIEW_TIMEOUT_MS = 30_000;
     private static final Pattern COOKIE_NAME = Pattern.compile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$");
     private static final Set<String> COOKIE_ATTRIBUTES = Collections.unmodifiableSet(new HashSet<String>() {{
@@ -114,7 +113,7 @@ public class MainActivity extends Activity {
     private boolean loggedInToTracsh = false;
     private boolean enteringStore = false;
     private final List<Merchant> merchants = new ArrayList<>();
-    private final Map<String, String> tracshCookies = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final TracshCookieJar tracshCookieJar = new TracshCookieJar();
     private final Set<HttpURLConnection> activeConnections = Collections.synchronizedSet(new HashSet<>());
     private final AtomicInteger requestGeneration = new AtomicInteger();
     private volatile boolean destroyed = false;
@@ -123,6 +122,7 @@ public class MainActivity extends Activity {
     private String merchantEmptyMessage = "Belum ada toko yang ditautkan ke akun ini.";
     private String currentScreen = "login";
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private Runnable loginTimeoutTask;
     private int webNavigationToken = 0;
     private final Runnable webLoadTimeout = () -> {
         if (webView != null && "akulaku".equals(currentScreen) && webProgress != null && webProgress.getVisibility() == View.VISIBLE) {
@@ -222,6 +222,7 @@ public class MainActivity extends Activity {
     }
 
     private void baseRoot() {
+        cancelLoginTimeout();
         requestGeneration.incrementAndGet();
         destroyWebView();
         computeScreenMode();
@@ -750,7 +751,7 @@ public class MainActivity extends Activity {
         final String selectedMode = loginMode;
         final String loginPage = "group".equals(selectedMode) ? TRACSH_GROUP_LOGIN_PAGE : TRACSH_ACCOUNT_LOGIN_PAGE;
         final String loginEndpoint = "group".equals(selectedMode) ? TRACSH_GROUP_LOGIN_ENDPOINT : TRACSH_ACCOUNT_LOGIN_ENDPOINT;
-        tracshCookies.clear();
+        clearTracshCookies();
         merchants.clear();
         loggedInToTracsh = false;
         merchantEmptyMessage = "Sesi Tracsh terverifikasi. Akun ini belum memiliki toko. Periksa jenis akun atau assignment toko. • AUTH_EMPTY • v" + BuildConfig.VERSION_NAME;
@@ -758,32 +759,38 @@ public class MainActivity extends Activity {
         if (loginButton != null) loginButton.setEnabled(false);
         if (loginModeButton != null) loginModeButton.setEnabled(false);
         statusText.setText("Login dan memverifikasi sesi Tracsh...");
-        final int generation = requestGeneration.get();
+        final int generation = requestGeneration.incrementAndGet();
+        scheduleLoginTimeout(generation);
         new Thread(() -> {
             String csrf = "";
             try {
                 HttpURLConnection preflight = open(loginPage, "GET", null);
                 try {
-                    String loginHtml = readResponse(preflight);
+                    int preflightCode = preflight.getResponseCode();
                     saveCookies(preflight);
-                    csrf = extractCsrf(loginHtml);
+                    if (preflightCode < 200 || preflightCode >= 400) {
+                        throw new Exception("Login preflight HTTP " + preflightCode);
+                    }
+                    csrf = extractCsrf(readResponse(preflight));
                 } finally {
                     closeConnection(preflight);
                 }
                 if (!isRequestCurrent(generation)) return;
                 String body = encode("username", username) + "&" + encode("password", password);
                 if (!csrf.isEmpty()) body += "&" + encode("csrfToken", csrf);
+                byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
                 HttpURLConnection conn = open(loginEndpoint, "POST", "application/x-www-form-urlencoded");
                 try {
-                    try (OutputStream os = conn.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
-                    int code = conn.getResponseCode();
-                    readResponse(conn);
+                    conn.setFixedLengthStreamingMode(bodyBytes.length);
+                    try (OutputStream os = conn.getOutputStream()) { os.write(bodyBytes); }
+                    conn.getResponseCode();
                     saveCookies(conn);
                 } finally { closeConnection(conn); }
 
+                showLoginProgress(generation, "Login diterima. Mengambil daftar toko...");
                 MerchantFetchResult verification = requestMerchants();
                 if (!verification.isSuccess()) {
-                    tracshCookies.clear();
+                    clearTracshCookies();
                     showLoginFailure(generation, loginVerificationMessage(verification));
                     return;
                 }
@@ -793,11 +800,12 @@ public class MainActivity extends Activity {
                 loggedInToTracsh = true;
                 runOnUiThread(() -> {
                     if (!isRequestCurrent(generation)) return;
+                    cancelLoginTimeout();
                     if (passwordInput != null) passwordInput.setText("");
                     showMerchantScreen(false);
                 });
             } catch (Exception e) {
-                tracshCookies.clear();
+                clearTracshCookies();
                 showLoginFailure(generation, "Verifikasi sesi gagal karena koneksi. Periksa internet lalu coba lagi. • VERIFY_NETWORK • v" + BuildConfig.VERSION_NAME);
             }
         }).start();
@@ -807,11 +815,44 @@ public class MainActivity extends Activity {
         if (!isRequestCurrent(generation)) return;
         runOnUiThread(() -> {
             if (!isRequestCurrent(generation)) return;
+            cancelLoginTimeout();
             if (progress != null) progress.setVisibility(View.GONE);
             if (loginButton != null) loginButton.setEnabled(true);
             if (loginModeButton != null) loginModeButton.setEnabled(true);
             if (statusText != null) statusText.setText(message);
         });
+    }
+
+    private void showLoginProgress(int generation, String message) {
+        if (!isRequestCurrent(generation)) return;
+        runOnUiThread(() -> {
+            if (!isRequestCurrent(generation)) return;
+            if (statusText != null) statusText.setText(message);
+        });
+    }
+
+    private void scheduleLoginTimeout(int generation) {
+        cancelLoginTimeout();
+        loginTimeoutTask = () -> {
+            if (!isRequestCurrent(generation)) return;
+            requestGeneration.incrementAndGet();
+            cancelActiveConnections();
+            clearTracshCookies();
+            if (progress != null) progress.setVisibility(View.GONE);
+            if (loginButton != null) loginButton.setEnabled(true);
+            if (loginModeButton != null) loginModeButton.setEnabled(true);
+            if (statusText != null) {
+                statusText.setText("Login melewati batas 60 detik. Periksa koneksi lalu coba lagi. • VERIFY_TIMEOUT • v" + BuildConfig.VERSION_NAME);
+            }
+            loginTimeoutTask = null;
+        };
+        mainHandler.postDelayed(loginTimeoutTask, LOGIN_TOTAL_TIMEOUT_MS);
+    }
+
+    private void cancelLoginTimeout() {
+        if (loginTimeoutTask == null) return;
+        mainHandler.removeCallbacks(loginTimeoutTask);
+        loginTimeoutTask = null;
     }
 
     private String loginVerificationMessage(MerchantFetchResult result) {
@@ -854,11 +895,11 @@ public class MainActivity extends Activity {
         HttpURLConnection conn = open(MERCHANT_ENDPOINT, "GET", null);
         try {
             int code = conn.getResponseCode();
-            String text = readResponse(conn);
             saveCookies(conn);
             if (code == 401) return MerchantFetchResult.failure("unauthorized", code);
             if (code == 403) return MerchantFetchResult.failure("forbidden", code);
             if (code < 200 || code >= 300) return MerchantFetchResult.failure("http", code);
+            String text = readResponse(conn);
             try {
                 return MerchantFetchResult.success(parseMerchants(text));
             } catch (Exception e) {
@@ -876,7 +917,7 @@ public class MainActivity extends Activity {
         String message;
         if ("unauthorized".equals(result.state)) {
             loggedInToTracsh = false;
-            tracshCookies.clear();
+            clearTracshCookies();
             message = "Sesi Tracsh berakhir. Tekan Logout lalu login kembali. • AUTH_401 • v" + BuildConfig.VERSION_NAME;
         } else if ("forbidden".equals(result.state)) {
             message = "Akun tidak diizinkan memuat toko. • AUTH_403 • v" + BuildConfig.VERSION_NAME;
@@ -980,13 +1021,12 @@ public class MainActivity extends Activity {
         conn.setConnectTimeout(NETWORK_TIMEOUT_MS);
         conn.setReadTimeout(NETWORK_TIMEOUT_MS);
         conn.setRequestProperty("Accept", "application/json, text/html, text/plain, */*");
+        conn.setRequestProperty("Accept-Encoding", "gzip");
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 MangprangSwitcherApk/" + BuildConfig.VERSION_NAME);
-        String tracshCookie = tracshCookieHeader();
         boolean exactTracshHost = "https".equalsIgnoreCase(target.getProtocol())
             && "tracsh.com".equalsIgnoreCase(target.getHost());
-        if (exactTracshHost && tracshCookie != null && !tracshCookie.trim().isEmpty()) {
-            conn.setRequestProperty("Cookie", tracshCookie);
-        }
+        String tracshCookie = exactTracshHost ? tracshCookieHeader(target) : "";
+        if (!tracshCookie.isEmpty()) conn.setRequestProperty("Cookie", tracshCookie);
         if (contentType != null) { conn.setRequestProperty("Content-Type", contentType); conn.setDoOutput(true); }
         activeConnections.add(conn);
         return conn;
@@ -996,35 +1036,26 @@ public class MainActivity extends Activity {
         if (conn != null) { activeConnections.remove(conn); conn.disconnect(); }
     }
 
+    private void cancelActiveConnections() {
+        List<HttpURLConnection> snapshot;
+        synchronized (activeConnections) { snapshot = new ArrayList<>(activeConnections); }
+        for (HttpURLConnection conn : snapshot) closeConnection(conn);
+    }
+
     private boolean isRequestCurrent(int generation) {
-        return !destroyed && generation == requestGeneration.get();
+        return !destroyed && !isFinishing() && !isDestroyed() && generation == requestGeneration.get();
     }
 
-    private void saveCookies(HttpURLConnection conn) {
-        Map<String, List<String>> headers = conn.getHeaderFields();
-        if (headers == null) return;
-        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
-            if (entry.getKey() == null || !"set-cookie".equalsIgnoreCase(entry.getKey()) || entry.getValue() == null) continue;
-            for (String value : entry.getValue()) {
-                if (value == null || value.trim().isEmpty()) continue;
-                String[] pair = value.trim().split("=", 2);
-                if (pair.length != 2 || !COOKIE_NAME.matcher(pair[0].trim()).matches()) continue;
-                String name = pair[0].trim();
-                if (COOKIE_ATTRIBUTES.contains(name.toLowerCase(Locale.US))) continue;
-                String cookieValue = pair[1].split(";", 2)[0].trim();
-                String lower = value.toLowerCase(Locale.US);
-                boolean expired = cookieValue.isEmpty() || "deleted".equalsIgnoreCase(cookieValue)
-                    || lower.contains("max-age=0") || lower.contains("max-age=-");
-                if (expired) tracshCookies.remove(name);
-                else tracshCookies.put(name, name + "=" + cookieValue);
-            }
-        }
+    private void clearTracshCookies() {
+        tracshCookieJar.clear();
     }
 
-    private String tracshCookieHeader() {
-        synchronized (tracshCookies) {
-            return TextUtils.join("; ", tracshCookies.values());
-        }
+    private void saveCookies(HttpURLConnection conn) throws Exception {
+        tracshCookieJar.store(conn.getURL(), conn.getHeaderFields());
+    }
+
+    private String tracshCookieHeader(URL target) throws Exception {
+        return tracshCookieJar.header(target);
     }
 
     private String extractCsrf(String html) {
@@ -1042,14 +1073,10 @@ public class MainActivity extends Activity {
     }
 
     private String readResponse(HttpURLConnection conn) throws Exception {
-        InputStream is;
-        try { is = conn.getInputStream(); } catch (Exception e) { is = conn.getErrorStream(); }
-        if (is == null) return "";
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) sb.append(line).append('\n');
-        return sb.toString();
+        int code = conn.getResponseCode();
+        InputStream raw = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+        if (raw == null) return "";
+        return LoginRuntime.readBody(raw, conn.getContentEncoding(), MAX_RESPONSE_BYTES);
     }
 
     private List<Merchant> parseMerchants(String text) throws Exception {
@@ -1088,17 +1115,12 @@ public class MainActivity extends Activity {
     }
 
     private List<Merchant> dedupeMerchants(List<Merchant> source) {
-        List<Merchant> out = new ArrayList<>();
+        LinkedHashMap<String, Merchant> unique = new LinkedHashMap<>();
         for (Merchant m : source) {
             String key = !m.merchantId.isEmpty() ? m.merchantId : (!m.id.isEmpty() ? m.id : m.title + m.email);
-            boolean exists = false;
-            for (Merchant existing : out) {
-                String existingKey = !existing.merchantId.isEmpty() ? existing.merchantId : (!existing.id.isEmpty() ? existing.id : existing.title + existing.email);
-                if (existingKey.equals(key)) { exists = true; break; }
-            }
-            if (!exists && (!m.title.isEmpty() || !m.email.isEmpty() || !m.merchantId.isEmpty())) out.add(m);
+            if (!unique.containsKey(key) && (!m.title.isEmpty() || !m.email.isEmpty() || !m.merchantId.isEmpty())) unique.put(key, m);
         }
-        return out;
+        return new ArrayList<>(unique.values());
     }
 
     private boolean looksLikeMerchant(JSONObject obj) {
@@ -1147,11 +1169,13 @@ public class MainActivity extends Activity {
     }
 
     private void logoutSession() {
-        requestGeneration.incrementAndGet();
-        for (HttpURLConnection conn : new ArrayList<>(activeConnections)) closeConnection(conn);
+        final int generation = requestGeneration.incrementAndGet();
+        cancelLoginTimeout();
+        cancelActiveConnections();
         clearAllCookies(() -> {
+            if (!isRequestCurrent(generation)) return;
             loggedInToTracsh = false;
-            tracshCookies.clear();
+            clearTracshCookies();
             merchants.clear();
             activeMerchantTitle = "";
             if (usernameInput != null) usernameInput.setText("");
@@ -1175,8 +1199,9 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         destroyed = true;
         requestGeneration.incrementAndGet();
+        cancelLoginTimeout();
         mainHandler.removeCallbacks(webLoadTimeout);
-        for (HttpURLConnection conn : new ArrayList<>(activeConnections)) closeConnection(conn);
+        cancelActiveConnections();
         destroyWebView();
         super.onDestroy();
     }
